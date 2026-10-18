@@ -146,6 +146,11 @@ Esta ejecución:
 En el dashboard web se muestran por separado el ranking heurístico y el
 ranking Markov seleccionado.
 
+También se conserva un historial de predicciones. Cada predicción queda
+asociada al sorteo que sirvió como base y, cuando aparece el siguiente
+resultado, se indica si el número estaba en el ranking Markov, en el
+heurístico o en ambos, junto con su posición.
+
 ## Interpretar el resultado
 
 El predictor muestra varias métricas:

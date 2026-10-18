@@ -18,6 +18,7 @@ from sync_ruleta_express import extract_results, fetch_page
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_CSV = ROOT / "Resultados_RuletaExpress.csv"
 BLOB_PATH = "Resultados_RuletaExpress.csv"
+PREDICTIONS_PATH = "ruleta_predictions.json"
 BLOB_TOKEN = os.environ.get("BLOB_READ_WRITE_TOKEN")
 BLOB_HOST = "https://blob.vercel-storage.com"
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
@@ -70,6 +71,114 @@ def serialize_rows(rows: list[dict[str, str]]) -> bytes:
     return output.getvalue().encode("utf-8-sig")
 
 
+def read_predictions() -> list[dict]:
+    local_path = ROOT / PREDICTIONS_PATH
+    if not BLOB_TOKEN:
+        if not local_path.exists():
+            return []
+        return json.loads(local_path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(blob_request("GET", PREDICTIONS_PATH).decode("utf-8"))
+    except HTTPError as error:
+        if error.code != 404:
+            raise
+        return []
+
+
+def save_predictions(predictions: list[dict]) -> None:
+    payload = json.dumps(predictions, ensure_ascii=False, indent=2).encode("utf-8")
+    if BLOB_TOKEN:
+        blob_request("PUT", PREDICTIONS_PATH, payload)
+        return
+    (ROOT / PREDICTIONS_PATH).write_bytes(payload)
+
+
+def draw_number(draw: str) -> int:
+    return int(draw.rsplit(" ", 1)[-1])
+
+
+def update_predictions(
+    predictions: list[dict],
+    rows: list[dict[str, str]],
+    recovery: dict,
+) -> list[dict]:
+    draws = sorted(
+        (row for row in rows if row.get("No_Sorteo")),
+        key=lambda row: draw_number(row["No_Sorteo"]),
+    )
+    by_source = {item["source_draw"] for item in predictions}
+    changed = False
+
+    for prediction in predictions:
+        if prediction.get("status") != "pendiente":
+            continue
+        source_number = draw_number(prediction["source_draw"])
+        next_draw = next(
+            (row for row in draws if draw_number(row["No_Sorteo"]) > source_number),
+            None,
+        )
+        if next_draw is None:
+            continue
+        actual = int(next_draw["Numero"])
+        markov_rank = next(
+            (
+                index + 1
+                for index, item in enumerate(prediction["markov"])
+                if item["number"] == actual
+            ),
+            None,
+        )
+        heuristic_rank = next(
+            (
+                index + 1
+                for index, item in enumerate(prediction["heuristic"])
+                if item["number"] == actual
+            ),
+            None,
+        )
+        prediction.update(
+            {
+                "status": "acierto" if markov_rank or heuristic_rank else "fallo",
+                "observed_draw": next_draw["No_Sorteo"],
+                "actual_number": actual,
+                "markov_rank": markov_rank,
+                "heuristic_rank": heuristic_rank,
+                "matched": (
+                    "ambos"
+                    if markov_rank and heuristic_rank
+                    else "markov"
+                    if markov_rank
+                    else "heuristico"
+                    if heuristic_rank
+                    else "ninguno"
+                ),
+            }
+        )
+        changed = True
+
+    if rows:
+        source_draw = rows[0]["No_Sorteo"]
+        if source_draw not in by_source:
+            predictions.append(
+                {
+                    "source_draw": source_draw,
+                    "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    "status": "pendiente",
+                    "markov": recovery["markov_forecast"],
+                    "heuristic": recovery["heuristic_forecast"],
+                }
+            )
+            changed = True
+
+    if changed:
+        save_predictions(predictions)
+    return sorted(
+        predictions,
+        key=lambda item: draw_number(item["source_draw"]),
+        reverse=True,
+    )
+
+
 def merge_results(rows: list[dict[str, str]], new_rows: list[dict[str, str]]) -> list[dict[str, str]]:
     merged = {row["No_Sorteo"]: row for row in rows if row.get("No_Sorteo")}
     merged.update({row["No_Sorteo"]: row for row in new_rows})
@@ -112,10 +221,17 @@ def dashboard() -> dict:
 
     recovery_error: str | None = None
     recovery = None
+    predictions: list[dict] = []
+    predictions_error: str | None = None
     try:
         recovery = recovery_for_rows(rows)
     except Exception as exception:
         recovery_error = str(exception)
+    if recovery is not None:
+        try:
+            predictions = update_predictions(read_predictions(), rows, recovery)
+        except Exception as exception:
+            predictions_error = str(exception)
 
     return {
         "results": rows,
@@ -123,6 +239,8 @@ def dashboard() -> dict:
         "sync_error": error,
         "recovery": recovery,
         "recovery_error": recovery_error,
+        "predictions": predictions,
+        "predictions_error": predictions_error,
     }
 
 

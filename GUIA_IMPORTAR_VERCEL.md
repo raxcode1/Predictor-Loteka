@@ -137,7 +137,8 @@ En la página principal verifica que:
 
 El navegador consulta la API cada 15 segundos. Vercel no mantiene un proceso
 Python ejecutándose continuamente; cada consulta activa la función serverless,
-que consulta Loteka y guarda el CSV actualizado en Blob.
+que consulta Loteka, guarda el CSV actualizado en Blob y conserva las
+predicciones evaluadas en `ruleta_predictions.json`.
 
 ## 7. Primer uso del histórico
 
@@ -206,4 +207,3 @@ deployment automáticamente. Para producción también puedes ejecutar:
 ```powershell
 npx vercel --prod
 ```
-

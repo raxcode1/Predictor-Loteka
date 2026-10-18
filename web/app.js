@@ -40,6 +40,33 @@ function render(data) {
   document.querySelector("#results-body").innerHTML = results
     .map((row) => `<tr><td>${row.Fecha}</td><td>${row.Hora}</td><td>${row.No_Sorteo}</td><td><b>${number(row.Numero)}</b></td></tr>`)
     .join("");
+
+  const predictionsError = document.querySelector("#predictions-error");
+  predictionsError.textContent = data.predictions_error || "";
+  predictionsError.classList.toggle("hidden", !data.predictions_error);
+  document.querySelector("#predictions-body").innerHTML = (data.predictions || [])
+    .map((prediction) => {
+      const result = prediction.status === "pendiente"
+        ? "Pendiente"
+        : `${number(prediction.actual_number)} · ${prediction.observed_draw}`;
+      const markov = prediction.markov_rank
+        ? `Sí · #${prediction.markov_rank}`
+        : "No";
+      const heuristic = prediction.heuristic_rank
+        ? `Sí · #${prediction.heuristic_rank}`
+        : "No";
+      const matched = prediction.status === "pendiente"
+        ? "Pendiente"
+        : prediction.matched === "ninguno"
+        ? "Ninguno"
+        : prediction.matched === "ambos"
+        ? "Ambos"
+        : prediction.matched === "markov"
+        ? "Markov"
+        : "Heurístico";
+      return `<tr><td>${prediction.source_draw}</td><td>${result}</td><td>${markov}</td><td>${heuristic}</td><td>${matched}</td></tr>`;
+    })
+    .join("");
 }
 
 async function refresh() {

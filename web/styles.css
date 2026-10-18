@@ -44,4 +44,5 @@ td:last-child { color: var(--accent); font-size: 1.1rem; }
 .alert { background: #40272a; border: 1px solid #7d4248; border-radius: 8px; color: #ffb9b9; margin-top: 14px; padding: 9px; }
 .hidden { display: none; }
 .disclaimer { color: var(--muted); font-size: .8rem; margin-top: 16px; text-align: center; }
+.panel + .panel { margin-top: 18px; }
 @media (max-width: 700px) { .hero { align-items: start; flex-direction: column; } .grid { grid-template-columns: 1fr; } .latest-result { font-size: 5rem; } .shell { padding-top: 26px; } }
