@@ -184,7 +184,7 @@ def markov_probabilities(
             context_total += 1
 
     denominator = context_total + alpha * OUTPUT_MODULUS
-    return [
+    probabilities = [
         (count + alpha) / denominator
         for count in counts
     ]
@@ -193,6 +193,7 @@ def markov_probabilities(
         total = sum(probabilities)
         if total:
             probabilities = [probability / total for probability in probabilities]
+    return probabilities
 
 
 def frequency_probabilities(
@@ -318,7 +319,8 @@ def select_markov_model(values: list[int]) -> tuple[dict, list[tuple[int, float]
     return best, ranked
 
 
-def report_black_box_forecast(path: Path) -> None:
+def build_state_recovery(path: Path) -> dict:
+    """Return the statistical recovery report in a format suitable for a UI."""
     frame = pd.read_csv(path, usecols=[OUTPUT_COLUMN])
     values = pd.to_numeric(frame[OUTPUT_COLUMN], errors="raise").astype("int64").tolist()
     values = list(reversed(values))
@@ -326,9 +328,41 @@ def report_black_box_forecast(path: Path) -> None:
         raise ValueError("Se necesitan al menos dos resultados para analizar transiciones.")
 
     backtest = backtest_transition_model(values)
-    forecast = rank_next_values(values)
+    heuristic = [
+        {"number": candidate, "probability": probability}
+        for candidate, probability in rank_next_values(values)
+    ]
     selected_model, selected_forecast = select_markov_model(values)
-    baseline = 1 / OUTPUT_MODULUS
+    markov = [
+        {"number": candidate, "probability": probability}
+        for candidate, probability in selected_forecast
+    ]
+    return {
+        "latest_number": values[-1],
+        "sample_size": len(values),
+        "backtest": {
+            **backtest,
+            "baseline": 1 / OUTPUT_MODULUS,
+        },
+        "heuristic_forecast": heuristic,
+        "selected_model": selected_model,
+        "markov_forecast": markov,
+    }
+
+
+def report_black_box_forecast(path: Path) -> None:
+    report = build_state_recovery(path)
+    backtest = report["backtest"]
+    forecast = [
+        (item["number"], item["probability"])
+        for item in report["heuristic_forecast"]
+    ]
+    selected_model = report["selected_model"]
+    selected_forecast = [
+        (item["number"], item["probability"])
+        for item in report["markov_forecast"]
+    ]
+    baseline = backtest["baseline"]
 
     print(
         f"Backtest transición: accuracy={backtest['accuracy']:.2%}, "
@@ -336,7 +370,7 @@ def report_black_box_forecast(path: Path) -> None:
         f"log_loss={backtest['log_loss']:.4f}",
         flush=True,
     )
-    print(f"Último resultado cronológico: {values[-1]}", flush=True)
+    print(f"Último resultado cronológico: {report['latest_number']}", flush=True)
     print("Ranking heurístico para el siguiente resultado:", flush=True)
     for rank, (candidate, probability) in enumerate(forecast, start=1):
         print(f"{rank}. {candidate} ({probability:.2%})", flush=True)

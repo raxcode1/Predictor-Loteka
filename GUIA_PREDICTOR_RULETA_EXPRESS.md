@@ -15,6 +15,10 @@ postprocesamiento, como anti-repetición.
 - `sync_ruleta_express.py`: sincronizador de resultados públicos.
 - `state_recovery.py`: diagnóstico, backtesting, ranking estadístico y búsqueda
   SMT opcional.
+- `web_app.py`: sitio web local, API del dashboard y sincronización automática.
+- `web/`: interfaz del dashboard.
+- `api/dashboard.py`: función serverless para Vercel.
+- `vercel.json`: rutas del sitio estático.
 
 ## Requisitos
 
@@ -76,6 +80,42 @@ adelanta la publicación de los sorteos.
 
 El modo `--watch` solo recopila resultados. No realiza apuestas ni interactúa
 con controles de juego.
+
+## Abrir el sitio web
+
+```powershell
+python .\web_app.py
+```
+
+Luego abre <http://127.0.0.1:8000>. El sitio muestra el CSV guardado, consulta
+Loteka automáticamente cada 15 segundos y recalcula el análisis estadístico de
+`state_recovery` cuando detecta un nuevo número de sorteo. El dashboard se
+detiene con `Ctrl+C`.
+
+## Publicar en Vercel
+
+La versión para Vercel usa una función serverless y Vercel Blob. No se puede
+mantener `web_app.py` ejecutándose como proceso persistente en Vercel.
+
+1. Crea un Blob Store en el proyecto de Vercel.
+2. Añade la variable `BLOB_READ_WRITE_TOKEN` al entorno de producción.
+3. Publica el repositorio:
+
+   ```powershell
+   npx vercel
+   ```
+
+4. Para producción:
+
+   ```powershell
+   npx vercel --prod
+   ```
+
+El navegador consulta `/api/dashboard` cada 15 segundos. Cada consulta obtiene
+los resultados públicos, los deduplica y guarda el CSV actualizado en Vercel
+Blob. El análisis `state_recovery` se recalcula cuando cambia el sorteo más
+reciente. El archivo CSV incluido en el repositorio se usa como datos iniciales
+si el Blob todavía no existe.
 
 ## Ejecutar el predictor
 

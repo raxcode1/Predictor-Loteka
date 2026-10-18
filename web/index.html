@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ruleta Express</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">MONITOR EN VIVO</p>
+        <h1>Ruleta Express</h1>
+        <p class="subtitle">Resultados publicados y estado estadístico actualizado automáticamente.</p>
+      </div>
+      <div class="status-card">
+        <span id="sync-dot" class="status-dot"></span>
+        <span id="sync-status">Conectando...</span>
+      </div>
+    </header>
+
+    <section class="grid">
+      <article class="panel latest-panel">
+        <div class="panel-heading">
+          <h2>Último resultado</h2>
+          <span id="last-sync" class="muted">-</span>
+        </div>
+        <div id="latest-result" class="latest-result">-</div>
+        <p id="latest-meta" class="muted">Esperando datos...</p>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><h2>State recovery</h2><span id="sample-size" class="muted">-</span></div>
+        <div id="recovery-error" class="alert hidden"></div>
+        <div class="metrics">
+          <div><span>Top 1</span><strong id="top1">-</strong></div>
+          <div><span>Top 3</span><strong id="top3">-</strong></div>
+          <div><span>Log-loss</span><strong id="log-loss">-</strong></div>
+        </div>
+        <h3>Ranking Markov</h3>
+        <ol id="markov-forecast" class="forecast"></ol>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>Resultados guardados</h2>
+        <span id="result-count" class="muted">0 resultados</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Hora</th><th>Sorteo</th><th>Número</th></tr></thead>
+          <tbody id="results-body"></tbody>
+        </table>
+      </div>
+    </section>
+    <p class="disclaimer">El análisis es estadístico y no garantiza el siguiente resultado.</p>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
