@@ -48,6 +48,8 @@ function render(data) {
     .map((prediction) => {
       const result = prediction.status === "pendiente"
         ? "Pendiente"
+        : prediction.status === "omitida_pausa"
+        ? "No evaluada · pausa"
         : `${number(prediction.actual_number)} · ${prediction.observed_draw}`;
       const markov = prediction.markov_rank
         ? `Sí · #${prediction.markov_rank}`
@@ -66,6 +68,13 @@ function render(data) {
         : "Heurístico";
       return `<tr><td>${prediction.source_draw}</td><td>${result}</td><td>${markov}</td><td>${heuristic}</td><td>${matched}</td></tr>`;
     })
+    .join("");
+  const pauses = data.pauses || [];
+  document.querySelector("#pauses-summary").textContent = pauses.length
+    ? `${pauses.length} pausa(s) detectada(s); esos sorteos no cuentan como predicciones evaluadas.`
+    : "No se han detectado pausas.";
+  document.querySelector("#pauses-body").innerHTML = pauses
+    .map((pause) => `<tr><td>${pause.from_draw}</td><td>${pause.to_draw}</td><td>${pause.skipped_count}</td><td>${new Date(pause.detected_at).toLocaleString()}</td></tr>`)
     .join("");
 }
 

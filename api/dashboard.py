@@ -30,6 +30,7 @@ EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 _cached_draw: str | None = None
 _cached_recovery: dict | None = None
 _local_predictions: list[dict] = []
+_local_prediction_store: dict = {"predictions": [], "pauses": []}
 
 
 def blob_request(
@@ -81,20 +82,35 @@ def serialize_rows(rows: list[dict[str, str]]) -> bytes:
     return output.getvalue().encode("utf-8-sig")
 
 
-def read_predictions() -> list[dict]:
+def read_prediction_store() -> dict:
+    global _local_prediction_store
     if not BLOB_TOKEN:
-        return list(_local_predictions)
+        return {
+            "predictions": list(_local_prediction_store["predictions"]),
+            "pauses": list(_local_prediction_store["pauses"]),
+        }
     try:
-        return json.loads(blob_request("GET", PREDICTIONS_PATH).decode("utf-8"))
+        stored = json.loads(blob_request("GET", PREDICTIONS_PATH).decode("utf-8"))
+        if isinstance(stored, list):
+            return {"predictions": stored, "pauses": []}
+        return {
+            "predictions": stored.get("predictions", []),
+            "pauses": stored.get("pauses", []),
+        }
     except HTTPError as error:
         if error.code != 404:
             raise
-        return []
+        return {"predictions": [], "pauses": []}
 
 
-def save_predictions(predictions: list[dict]) -> None:
-    global _local_predictions
-    payload = json.dumps(predictions, ensure_ascii=False, indent=2).encode("utf-8")
+def save_prediction_store(store: dict) -> None:
+    global _local_prediction_store, _local_predictions
+    _local_prediction_store = {
+        "predictions": list(store["predictions"]),
+        "pauses": list(store["pauses"]),
+    }
+    _local_predictions = list(store["predictions"])
+    payload = json.dumps(_local_prediction_store, ensure_ascii=False, indent=2).encode("utf-8")
     if BLOB_TOKEN:
         blob_request(
             "PUT",
@@ -102,8 +118,10 @@ def save_predictions(predictions: list[dict]) -> None:
             payload,
             "application/json; charset=utf-8",
         )
-        return
-    _local_predictions = list(predictions)
+
+
+def read_predictions() -> list[dict]:
+    return read_prediction_store()["predictions"]
 
 
 def draw_number(draw: str) -> int:
@@ -114,7 +132,9 @@ def update_predictions(
     predictions: list[dict],
     rows: list[dict[str, str]],
     recovery: dict,
-) -> list[dict]:
+) -> tuple[list[dict], list[dict]]:
+    store = read_prediction_store()
+    pauses = store["pauses"]
     draws = sorted(
         (row for row in rows if row.get("No_Sorteo")),
         key=lambda row: draw_number(row["No_Sorteo"]),
@@ -131,6 +151,19 @@ def update_predictions(
             None,
         )
         if next_draw is None:
+            continue
+        source_number = draw_number(prediction["source_draw"])
+        next_number = draw_number(next_draw["No_Sorteo"])
+        if next_number > source_number + 1:
+            prediction.update(
+                {
+                    "status": "omitida_pausa",
+                    "observed_draw": next_draw["No_Sorteo"],
+                    "actual_number": None,
+                    "matched": "no evaluada",
+                }
+            )
+            changed = True
             continue
         actual = int(next_draw["Numero"])
         markov_rank = next(
@@ -171,6 +204,27 @@ def update_predictions(
 
     if rows:
         source_draw = rows[0]["No_Sorteo"]
+        source_number = draw_number(source_draw)
+        previous_draws = [
+            draw_number(item["source_draw"])
+            for item in predictions
+            if item.get("source_draw")
+        ]
+        previous_draw = max(previous_draws, default=None)
+        if previous_draw is not None and source_number > previous_draw + 1:
+            pause = {
+                "from_draw": f"No. {previous_draw + 1}",
+                "to_draw": f"No. {source_number - 1}",
+                "skipped_count": source_number - previous_draw - 1,
+                "detected_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+            if not any(
+                item["from_draw"] == pause["from_draw"]
+                and item["to_draw"] == pause["to_draw"]
+                for item in pauses
+            ):
+                pauses.append(pause)
+                changed = True
         if source_draw not in by_source:
             predictions.append(
                 {
@@ -184,12 +238,12 @@ def update_predictions(
             changed = True
 
     if changed:
-        save_predictions(predictions)
+        save_prediction_store({"predictions": predictions, "pauses": pauses})
     return sorted(
         predictions,
         key=lambda item: draw_number(item["source_draw"]),
         reverse=True,
-    )
+    ), sorted(pauses, key=lambda item: draw_number(item["from_draw"]), reverse=True)
 
 
 def merge_results(rows: list[dict[str, str]], new_rows: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -247,9 +301,12 @@ def dashboard() -> dict:
         recovery_error = str(exception)
     if recovery is not None:
         try:
-            predictions = update_predictions(read_predictions(), rows, recovery)
+            predictions, pauses = update_predictions(read_predictions(), rows, recovery)
         except Exception as exception:
             predictions_error = str(exception)
+            pauses = []
+    else:
+        pauses = []
 
     return {
         "results": rows,
@@ -258,6 +315,7 @@ def dashboard() -> dict:
         "recovery": recovery,
         "recovery_error": recovery_error,
         "predictions": predictions,
+        "pauses": pauses,
         "predictions_error": predictions_error,
     }
 

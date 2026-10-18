@@ -151,6 +151,10 @@ asociada al sorteo que sirvió como base y, cuando aparece el siguiente
 resultado, se indica si el número estaba en el ranking Markov, en el
 heurístico o en ambos, junto con su posición.
 
+Si Vercel estuvo pausado, los sorteos que no pudieron observarse se registran
+como una pausa. Sus predicciones quedan como `omitida_pausa` y no se cuentan
+como aciertos ni fallos.
+
 ## Interpretar el resultado
 
 El predictor muestra varias métricas:

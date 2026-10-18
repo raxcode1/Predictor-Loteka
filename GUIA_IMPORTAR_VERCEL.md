@@ -156,7 +156,9 @@ En la página principal verifica que:
 El navegador consulta la API cada 15 segundos. Vercel no mantiene un proceso
 Python ejecutándose continuamente; cada consulta activa la función serverless,
 que consulta Loteka, guarda el CSV actualizado en Blob y conserva las
-predicciones evaluadas en `ruleta_predictions.json`.
+predicciones evaluadas en `ruleta_predictions.json`. Si el proyecto estuvo
+pausado, al volver a recibir una petición se detectan los números de sorteo
+omitidos: se registran como pausa y no cuentan como aciertos ni fallos.
 
 ## 7. Primer uso del histórico
 
