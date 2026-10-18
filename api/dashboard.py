@@ -25,6 +25,7 @@ EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 
 _cached_draw: str | None = None
 _cached_recovery: dict | None = None
+_local_predictions: list[dict] = []
 
 
 def blob_request(method: str, path: str = "", body: bytes | None = None) -> bytes:
@@ -72,11 +73,8 @@ def serialize_rows(rows: list[dict[str, str]]) -> bytes:
 
 
 def read_predictions() -> list[dict]:
-    local_path = ROOT / PREDICTIONS_PATH
     if not BLOB_TOKEN:
-        if not local_path.exists():
-            return []
-        return json.loads(local_path.read_text(encoding="utf-8"))
+        return list(_local_predictions)
     try:
         return json.loads(blob_request("GET", PREDICTIONS_PATH).decode("utf-8"))
     except HTTPError as error:
@@ -86,11 +84,12 @@ def read_predictions() -> list[dict]:
 
 
 def save_predictions(predictions: list[dict]) -> None:
+    global _local_predictions
     payload = json.dumps(predictions, ensure_ascii=False, indent=2).encode("utf-8")
     if BLOB_TOKEN:
         blob_request("PUT", PREDICTIONS_PATH, payload)
         return
-    (ROOT / PREDICTIONS_PATH).write_bytes(payload)
+    _local_predictions = list(predictions)
 
 
 def draw_number(draw: str) -> int:

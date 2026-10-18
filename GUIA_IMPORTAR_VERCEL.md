@@ -77,6 +77,11 @@ Comprueba en **Project Settings > Environment Variables** que
 `BLOB_READ_WRITE_TOKEN` esté configurada para **Production**. También puedes
 marcar **Preview** y **Development**.
 
+Si el token no está configurado, la aplicación puede mostrar el CSV incluido,
+pero Vercel no puede guardar predicciones de forma permanente. En ese modo
+las predicciones solo permanecen temporalmente en la memoria de una instancia
+serverless y pueden desaparecer cuando Vercel la reinicie.
+
 Si la variable no aparece:
 
 1. Abre el Blob Store.
