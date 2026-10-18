@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acceso · Ruleta Express</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="login-shell">
+    <form id="login-form" class="panel login-panel">
+      <p class="eyebrow">ACCESO PRIVADO</p>
+      <h1>Ruleta Express</h1>
+      <p class="subtitle">Inicia sesión para ver el dashboard.</p>
+      <label>Usuario<input name="username" value="admin" autocomplete="username" required></label>
+      <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
+      <div id="login-error" class="alert hidden"></div>
+      <button type="submit">Entrar</button>
+    </form>
+  </main>
+  <script>
+    document.querySelector("#login-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const response = await fetch("/api/auth", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(Object.fromEntries(form)),
+      });
+      if (response.ok) {
+        window.location.href = "/";
+        return;
+      }
+      const error = document.querySelector("#login-error");
+      error.textContent = "Usuario o contraseña incorrectos.";
+      error.classList.remove("hidden");
+    });
+  </script>
+</body>
+</html>

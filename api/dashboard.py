@@ -12,6 +12,10 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import state_recovery
+try:
+    from auth_utils import authorized
+except ImportError:
+    from api.auth_utils import authorized
 from sync_ruleta_express import extract_results, fetch_page
 
 
@@ -245,6 +249,14 @@ def dashboard() -> dict:
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
+        if not authorized(self):
+            body = b'{"error":"Autenticacion requerida"}'
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         try:
             body = json.dumps(dashboard(), ensure_ascii=False).encode("utf-8")
             self.send_response(200)

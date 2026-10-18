@@ -21,6 +21,7 @@ El proyecto ya incluye:
 - `vercel.json`: rutas del frontend.
 - `requirements.txt`: dependencias Python.
 - `Resultados_RuletaExpress.csv`: histórico inicial.
+- Protección de acceso mediante sesión de administrador.
 
 ## 2. Importar el repositorio
 
@@ -72,6 +73,18 @@ escribas en el código, no lo subas a GitHub y no lo incluyas en archivos
 `.env` versionados.
 
 ## 4. Configurar la variable de entorno
+
+Además de `BLOB_READ_WRITE_TOKEN`, crea estas variables secretas en Vercel:
+
+```text
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=una-contraseña-larga-y-única
+SESSION_SECRET=una-cadena-aleatoria-larga
+```
+
+No uses estos valores literalmente. Genera una contraseña y un secreto
+distintos, y no los guardes en GitHub. La sesión dura 7 días y usa una cookie
+`HttpOnly`, `Secure` y `SameSite=Lax`.
 
 Comprueba en **Project Settings > Environment Variables** que
 `BLOB_READ_WRITE_TOKEN` esté configurada para **Production**. También puedes

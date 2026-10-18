@@ -80,5 +80,14 @@ async function refresh() {
   }
 }
 
+document.querySelector("#logout").addEventListener("click", async () => {
+  await fetch("/api/auth", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({action: "logout"}),
+  });
+  window.location.href = "/";
+});
+
 refresh();
 setInterval(refresh, 15000);
