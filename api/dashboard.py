@@ -32,7 +32,12 @@ _cached_recovery: dict | None = None
 _local_predictions: list[dict] = []
 
 
-def blob_request(method: str, path: str = "", body: bytes | None = None) -> bytes:
+def blob_request(
+    method: str,
+    path: str = "",
+    body: bytes | None = None,
+    content_type: str = "application/octet-stream",
+) -> bytes:
     if not BLOB_TOKEN:
         raise RuntimeError("Falta la variable de entorno BLOB_READ_WRITE_TOKEN.")
     request = Request(
@@ -42,7 +47,7 @@ def blob_request(method: str, path: str = "", body: bytes | None = None) -> byte
         headers={
             "Authorization": f"Bearer {BLOB_TOKEN}",
             "x-api-version": "7",
-            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Type": content_type,
         },
     )
     with urlopen(request, timeout=20) as response:
@@ -91,7 +96,12 @@ def save_predictions(predictions: list[dict]) -> None:
     global _local_predictions
     payload = json.dumps(predictions, ensure_ascii=False, indent=2).encode("utf-8")
     if BLOB_TOKEN:
-        blob_request("PUT", PREDICTIONS_PATH, payload)
+        blob_request(
+            "PUT",
+            PREDICTIONS_PATH,
+            payload,
+            "application/json; charset=utf-8",
+        )
         return
     _local_predictions = list(predictions)
 
@@ -217,7 +227,12 @@ def dashboard() -> dict:
     try:
         current = merge_results(rows, extract_results(fetch_page()))
         if BLOB_TOKEN and serialize_rows(current) != serialize_rows(rows):
-            blob_request("PUT", BLOB_PATH, serialize_rows(current))
+            blob_request(
+                "PUT",
+                BLOB_PATH,
+                serialize_rows(current),
+                "text/csv; charset=utf-8",
+            )
         rows = current
     except Exception as exception:
         error = str(exception)
