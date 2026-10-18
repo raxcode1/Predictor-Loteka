@@ -32,6 +32,9 @@ function render(data) {
     document.querySelector("#markov-forecast").innerHTML = recovery.markov_forecast
       .map((item, index) => `<li><span>${index + 1}. ${number(item.number)}</span><strong>${percent(item.probability)}</strong></li>`)
       .join("");
+    document.querySelector("#heuristic-forecast").innerHTML = recovery.heuristic_forecast
+      .map((item, index) => `<li><span>${index + 1}. ${number(item.number)}</span><strong>${percent(item.probability)}</strong></li>`)
+      .join("");
   }
 
   document.querySelector("#results-body").innerHTML = results

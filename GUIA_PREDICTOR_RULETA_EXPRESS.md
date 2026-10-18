@@ -143,6 +143,9 @@ Esta ejecución:
 - Selecciona el modelo con menor `log-loss` en un holdout temporal.
 - Muestra candidatos para el siguiente resultado.
 
+En el dashboard web se muestran por separado el ranking heurístico y el
+ranking Markov seleccionado.
+
 ## Interpretar el resultado
 
 El predictor muestra varias métricas:
