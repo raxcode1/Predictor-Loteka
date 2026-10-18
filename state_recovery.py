@@ -16,6 +16,7 @@ OBSERVED_COUNT = 50
 VERIFICATION_COUNT = 10
 OUTPUT_MODULUS = 19
 EXPECTED_REPEAT_RATE = 1 / OUTPUT_MODULUS
+LOG_LOSS_EPSILON = 1e-15
 
 
 @dataclass(frozen=True)
@@ -263,7 +264,9 @@ def evaluate_markov_model(
             key=probabilities.__getitem__,
             reverse=True,
         )
-        log_loss -= math.log(probabilities[values[index]])
+        # Anti-repeat models assign zero probability to an observed repeat.
+        # Keep that model strongly penalized without evaluating log(0).
+        log_loss -= math.log(max(probabilities[values[index]], LOG_LOSS_EPSILON))
         for position, cutoff in enumerate((1, 3, 5)):
             hits[position] += int(values[index] in ranking[:cutoff])
         total += 1
