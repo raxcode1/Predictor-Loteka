@@ -19,6 +19,8 @@ postprocesamiento, como anti-repetición.
 - `web/`: interfaz del dashboard.
 - `api/dashboard.py`: función serverless para Vercel.
 - `vercel.json`: rutas del sitio estático.
+- `GUIA_IMPORTAR_VERCEL.md`: guía paso a paso para importar y configurar el
+  proyecto en Vercel.
 
 ## Requisitos
 
@@ -93,6 +95,10 @@ Loteka automáticamente cada 15 segundos y recalcula el análisis estadístico d
 detiene con `Ctrl+C`.
 
 ## Publicar en Vercel
+
+Para una guía completa de importación desde GitHub, configuración de Blob,
+variables de entorno y comprobación del deployment, consulta
+[GUIA_IMPORTAR_VERCEL.md](./GUIA_IMPORTAR_VERCEL.md).
 
 La versión para Vercel usa una función serverless y Vercel Blob. No se puede
 mantener `web_app.py` ejecutándose como proceso persistente en Vercel.
