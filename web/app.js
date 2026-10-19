@@ -81,14 +81,7 @@ function render(data) {
 async function refresh() {
   try {
     const response = await fetch("/api/dashboard", { cache: "no-store" });
-    if (!response.ok) {
-      let msg = `HTTP ${response.status}`;
-      try {
-        const body = await response.json();
-        if (body && body.error) msg += ` - ${body.error}`;
-      } catch (_) {}
-      throw new Error(msg);
-    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     render(await response.json());
   } catch (error) {
     document.querySelector("#sync-dot").classList.add("error");

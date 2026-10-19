@@ -21,20 +21,9 @@ from sync_ruleta_express import extract_results, fetch_page
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_CSV = ROOT / "Resultados_RuletaExpress.csv"
-LOCAL_PREDICTIONS = ROOT / "ruleta_predictions.json"
 BLOB_PATH = "Resultados_RuletaExpress.csv"
 PREDICTIONS_PATH = "ruleta_predictions.json"
-def get_blob_token() -> str | None:
-    token = os.environ.get("BLOB_READ_WRITE_TOKEN")
-    if token:
-        return token.strip().strip('"').strip("'")
-    for key, value in os.environ.items():
-        if "READ_WRITE_TOKEN" in key and value:
-            return value.strip().strip('"').strip("'")
-    return None
-
-
-BLOB_TOKEN = get_blob_token()
+BLOB_TOKEN = os.environ.get("BLOB_READ_WRITE_TOKEN")
 BLOB_HOST = "https://blob.vercel-storage.com"
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 
@@ -42,47 +31,6 @@ _cached_draw: str | None = None
 _cached_recovery: dict | None = None
 _local_predictions: list[dict] = []
 _local_prediction_store: dict = {"predictions": [], "pauses": []}
-_blob_urls: dict[str, str] = {}
-_last_storage_error: str | None = None
-
-
-def _resolve_blob_url(path: str) -> str:
-    """Find the public URL of a blob stored in Vercel Blob by its pathname."""
-    if path in _blob_urls:
-        return _blob_urls[path]
-    if not BLOB_TOKEN:
-        raise RuntimeError("Falta la variable de entorno BLOB_READ_WRITE_TOKEN.")
-    base_prefix = path.rsplit(".", 1)[0]
-    list_request = Request(
-        f"{BLOB_HOST}?prefix={base_prefix}&limit=100",
-        method="GET",
-        headers={
-            "Authorization": f"Bearer {BLOB_TOKEN}",
-            "x-api-version": "7",
-        },
-    )
-    with urlopen(list_request, timeout=20) as response:
-        result = json.loads(response.read())
-    blobs = result.get("blobs", [])
-    # 1. Exact pathname match
-    for blob in blobs:
-        if blob.get("pathname") == path:
-            url = blob.get("url", "")
-            if url:
-                _blob_urls[path] = url
-                return url
-    # 2. Prefix match (in case of random suffix), sort newest first
-    matching = [
-        blob for blob in blobs
-        if blob.get("pathname", "").startswith(base_prefix)
-    ]
-    if matching:
-        matching.sort(key=lambda b: b.get("uploadedAt", ""), reverse=True)
-        url = matching[0].get("url", "")
-        if url:
-            _blob_urls[path] = url
-            return url
-    raise HTTPError(f"{BLOB_HOST}/{path}", 404, "Not Found", None, None)
 
 
 def blob_request(
@@ -93,62 +41,18 @@ def blob_request(
 ) -> bytes:
     if not BLOB_TOKEN:
         raise RuntimeError("Falta la variable de entorno BLOB_READ_WRITE_TOKEN.")
-    # GET: resolve the actual public URL via the list API, then fetch with cache=0.
-    if method == "GET" and path:
-        url = _resolve_blob_url(path)
-        separator = "&" if "?" in url else "?"
-        fetch_url = f"{url}{separator}cache=0"
-        fetch_req = Request(
-            fetch_url,
-            headers={"Cache-Control": "no-cache"},
-        )
-        try:
-            with urlopen(fetch_req, timeout=20) as response:
-                return response.read()
-        except HTTPError as error:
-            if error.code in (401, 403):
-                auth_req = Request(
-                    fetch_url,
-                    headers={
-                        "Authorization": f"Bearer {BLOB_TOKEN}",
-                        "Cache-Control": "no-cache",
-                    },
-                )
-                with urlopen(auth_req, timeout=20) as response:
-                    return response.read()
-            raise
-    # PUT / other methods: send to the management endpoint.
-    headers = {
-        "Authorization": f"Bearer {BLOB_TOKEN}",
-        "x-api-version": "7",
-        "Content-Type": content_type,
-    }
-    query_params = ""
-    if method == "PUT":
-        headers["x-add-random-suffix"] = "false"
-        headers["x-allow-overwrite"] = "true"
-        query_params = "?addRandomSuffix=false&allowOverwrite=true"
-    request_url = f"{BLOB_HOST}/{path}{query_params}" if path else BLOB_HOST
     request = Request(
-        request_url,
+        f"{BLOB_HOST}/{path}" if path else BLOB_HOST,
         data=body,
         method=method,
-        headers=headers,
+        headers={
+            "Authorization": f"Bearer {BLOB_TOKEN}",
+            "x-api-version": "7",
+            "Content-Type": content_type,
+        },
     )
     with urlopen(request, timeout=20) as response:
-        data = response.read()
-    # After a successful PUT, cache the public URL returned by the API
-    if method == "PUT" and path:
-        try:
-            result = json.loads(data)
-            url = result.get("url", "")
-            if url:
-                _blob_urls[path] = url
-                if result.get("pathname"):
-                    _blob_urls[result["pathname"]] = url
-        except (json.JSONDecodeError, KeyError):
-            pass
-    return data
+        return response.read()
 
 
 def read_csv_bytes(data: bytes) -> list[dict[str, str]]:
@@ -160,17 +64,14 @@ def read_csv_bytes(data: bytes) -> list[dict[str, str]]:
 
 
 def read_rows() -> list[dict[str, str]]:
-    global _last_storage_error
-    if BLOB_TOKEN:
-        try:
-            return read_csv_bytes(blob_request("GET", BLOB_PATH))
-        except Exception as error:
-            if not (isinstance(error, HTTPError) and error.code == 404):
-                _last_storage_error = f"Error al leer CSV de Vercel Blob: {error}"
-    try:
+    if not BLOB_TOKEN:
         return read_csv_bytes(LOCAL_CSV.read_bytes())
-    except Exception as error:
-        return []
+    try:
+        return read_csv_bytes(blob_request("GET", BLOB_PATH))
+    except HTTPError as error:
+        if error.code != 404:
+            raise
+        return read_csv_bytes(LOCAL_CSV.read_bytes())
 
 
 def serialize_rows(rows: list[dict[str, str]]) -> bytes:
@@ -182,39 +83,28 @@ def serialize_rows(rows: list[dict[str, str]]) -> bytes:
 
 
 def read_prediction_store() -> dict:
-    global _local_prediction_store, _last_storage_error
-    if BLOB_TOKEN:
-        try:
-            data = blob_request("GET", PREDICTIONS_PATH)
-            stored = json.loads(data.decode("utf-8"))
-            if isinstance(stored, list):
-                return {"predictions": stored, "pauses": []}
-            return {
-                "predictions": stored.get("predictions", []),
-                "pauses": stored.get("pauses", []),
-            }
-        except Exception as error:
-            if not (isinstance(error, HTTPError) and error.code == 404):
-                _last_storage_error = f"Error al leer predicciones de Vercel Blob: {error}"
-    if LOCAL_PREDICTIONS.exists():
-        try:
-            stored = json.loads(LOCAL_PREDICTIONS.read_text(encoding="utf-8"))
-            if isinstance(stored, list):
-                return {"predictions": stored, "pauses": []}
-            return {
-                "predictions": stored.get("predictions", []),
-                "pauses": stored.get("pauses", []),
-            }
-        except Exception:
-            pass
-    return {
-        "predictions": list(_local_prediction_store["predictions"]),
-        "pauses": list(_local_prediction_store["pauses"]),
-    }
+    global _local_prediction_store
+    if not BLOB_TOKEN:
+        return {
+            "predictions": list(_local_prediction_store["predictions"]),
+            "pauses": list(_local_prediction_store["pauses"]),
+        }
+    try:
+        stored = json.loads(blob_request("GET", PREDICTIONS_PATH).decode("utf-8"))
+        if isinstance(stored, list):
+            return {"predictions": stored, "pauses": []}
+        return {
+            "predictions": stored.get("predictions", []),
+            "pauses": stored.get("pauses", []),
+        }
+    except HTTPError as error:
+        if error.code != 404:
+            raise
+        return {"predictions": [], "pauses": []}
 
 
 def save_prediction_store(store: dict) -> None:
-    global _local_prediction_store, _local_predictions, _last_storage_error
+    global _local_prediction_store, _local_predictions
     _local_prediction_store = {
         "predictions": list(store["predictions"]),
         "pauses": list(store["pauses"]),
@@ -222,21 +112,12 @@ def save_prediction_store(store: dict) -> None:
     _local_predictions = list(store["predictions"])
     payload = json.dumps(_local_prediction_store, ensure_ascii=False, indent=2).encode("utf-8")
     if BLOB_TOKEN:
-        try:
-            blob_request(
-                "PUT",
-                PREDICTIONS_PATH,
-                payload,
-                "application/json; charset=utf-8",
-            )
-            _last_storage_error = None
-        except Exception as error:
-            _last_storage_error = f"Error guardando en Vercel Blob: {error}"
-    else:
-        try:
-            LOCAL_PREDICTIONS.write_bytes(payload)
-        except Exception:
-            pass
+        blob_request(
+            "PUT",
+            PREDICTIONS_PATH,
+            payload,
+            "application/json; charset=utf-8",
+        )
 
 
 def read_predictions() -> list[dict]:
@@ -248,12 +129,12 @@ def draw_number(draw: str) -> int:
 
 
 def update_predictions(
-    store: dict,
+    predictions: list[dict],
     rows: list[dict[str, str]],
     recovery: dict,
 ) -> tuple[list[dict], list[dict]]:
-    predictions = list(store.get("predictions", []))
-    pauses = list(store.get("pauses", []))
+    store = read_prediction_store()
+    pauses = store["pauses"]
     draws = sorted(
         (row for row in rows if row.get("No_Sorteo")),
         key=lambda row: draw_number(row["No_Sorteo"]),
@@ -395,8 +276,6 @@ def recovery_for_rows(rows: list[dict[str, str]]) -> dict:
 
 
 def dashboard() -> dict:
-    global BLOB_TOKEN
-    BLOB_TOKEN = get_blob_token()
     rows = read_rows()
     error: str | None = None
     try:
@@ -422,38 +301,12 @@ def dashboard() -> dict:
         recovery_error = str(exception)
     if recovery is not None:
         try:
-            store = read_prediction_store()
-            predictions, pauses = update_predictions(store, rows, recovery)
+            predictions, pauses = update_predictions(read_predictions(), rows, recovery)
         except Exception as exception:
             predictions_error = str(exception)
             pauses = []
     else:
         pauses = []
-
-    storage_diagnostic: str | None = None
-    if not BLOB_TOKEN:
-        relevant_keys = [
-            k for k in os.environ.keys()
-            if any(w in k.upper() for w in ("BLOB", "TOKEN", "STORAGE", "READ_WRITE"))
-        ]
-        storage_diagnostic = (
-            f"ADVERTENCIA: No se encontró token de Vercel Blob (variables detectadas: {relevant_keys or 'ninguna'}). "
-            "Para activarlo: asegúrate de que el Blob Store esté conectado con la casilla 'Production' y haz clic en 'Redeploy' en Vercel."
-        )
-    elif _last_storage_error:
-        token_info = (
-            f"Token en uso: {BLOB_TOKEN[:14]}...{BLOB_TOKEN[-6:]} (longitud {len(BLOB_TOKEN)})"
-            if BLOB_TOKEN
-            else "Sin token"
-        )
-        storage_diagnostic = f"{_last_storage_error} ({token_info})"
-
-    if storage_diagnostic:
-        predictions_error = (
-            f"{predictions_error} · {storage_diagnostic}"
-            if predictions_error
-            else storage_diagnostic
-        )
 
     return {
         "results": rows,
