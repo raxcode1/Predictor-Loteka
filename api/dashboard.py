@@ -110,21 +110,28 @@ def prediction_store():
         try:
             stored = json.loads(blob_request("GET", PREDICTIONS_PATH).decode("utf-8"))
         except HTTPError as error:
+            if error.code == 403:
+                return {}
             if error.code != 404:
-                raise
+                return {}
+            return {}
+        except Exception:
             return {}
         if isinstance(stored, list):
             return {"predictions": stored, "pauses": []}
         return stored if isinstance(stored, dict) else {}
 
     def save(data: dict) -> None:
-        payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-        blob_request(
-            "PUT",
-            PREDICTIONS_PATH,
-            payload,
-            "application/json; charset=utf-8",
-        )
+        try:
+            payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+            blob_request(
+                "PUT",
+                PREDICTIONS_PATH,
+                payload,
+                "application/json; charset=utf-8",
+            )
+        except Exception:
+            pass
 
     return load, save
 
