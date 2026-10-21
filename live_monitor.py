@@ -700,11 +700,17 @@ class LiveMonitor:
             if not decision.get("fired"):
                 continue
             stake = decision.get("stake") or {}
+            try:
+                num = decision.get("number")
+                num = num if num is not None and num != "number" else None
+                hist_num = int(num) if num is not None else None
+            except Exception:
+                hist_num = None
             history.append(
                 {
                     "source_draw": record.get("source_draw"),
                     "observed_draw": record.get("observed_draw"),
-                    "number": decision.get("number"),
+                    "number": hist_num,
                     "probability": decision.get("probability"),
                     "confidence": decision.get("confidence"),
                     "anchor": bool(decision.get("anchor")),
