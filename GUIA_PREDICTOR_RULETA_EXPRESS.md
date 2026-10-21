@@ -21,6 +21,12 @@ postprocesamiento, como anti-repetición.
 - `vercel.json`: rutas del sitio estático.
 - `GUIA_IMPORTAR_VERCEL.md`: guía paso a paso para importar y configurar el
   proyecto en Vercel.
+- `m4_engine/`: motor cuantitativo M4 (alertas de alta ventaja, validación
+  empírica y stake dinámico).
+- `ejemplo_alertas_en_vivo.py`: demostración del motor M4 ronda a ronda.
+- `verificar_m4_engine.py`: comprobaciones automáticas del motor M4.
+- `informe_validacion_m4.md` y `informe_validacion_m4.json`: última validación
+  sobre el log de supervisión.
 
 ## Requisitos
 
@@ -292,3 +298,124 @@ el siguiente ni para automatizar apuestas.
 
 5. Considerar que existe una mejora solo si las métricas fuera de muestra
    superan de forma estable las líneas base.
+
+## Motor de alertas M4
+
+El paquete `m4_engine` implementa la estrategia descrita en la «Especificación
+de Estrategia Cuantitativa» (PDF) como código auditable: carga el log de
+supervisión, reproduce los hallazgos del documento, los contrasta con pruebas
+estadísticas y expone un motor de alertas que funciona ronda a ronda.
+
+### Validar la estrategia
+
+```powershell
+python -m m4_engine --output informe_validacion_m4.md --json informe_validacion_m4.json
+```
+
+Opciones útiles:
+
+- `--primary-mode any|tie|strict`: cómo se exige que M4 sea el modelo
+  principal. `any` conduce la alerta con M4 y trata el resto de modelos como
+  ruido de fondo; `tie` exige que M4 alcance la probabilidad máxima de la
+  ronda; `strict` exige que sea el único máximo. La lectura literal del PDF es
+  `strict`.
+- `--probability-min`, `--probability-max`, `--max-spread`: umbrales del núcleo
+  de la especificación.
+- `--payout european37|express19`: modelo de pago usado para el dimensionamiento
+  del stake. `european37` es el supuesto del PDF (37 casillas, 35:1, ventaja de
+  la casa 2,70%); `express19` corresponde al espacio de resultados realmente
+  observado (0..18, 18:1, equilibrio 5,26%).
+
+El informe incluye la auditoría de integridad del log, el contraste de cada
+afirmación del PDF, las zonas de probabilidad, las matrices de confusión, el PnL
+simulado con apuestas planas, la validación cronológica fuera de muestra, el
+mapa de sensibilidad de umbrales y el control de multiplicidad.
+
+### Verificar el motor
+
+```powershell
+python .\verificar_m4_engine.py
+```
+
+Ejecuta 57 comprobaciones sin dependencias externas: carga del CSV,
+reproducción de los números del PDF, integridad del log, estadística (Wilson,
+binomial, Fisher, Holm-Bonferroni), módulo de Kelly, motor de alertas,
+ausencia de look-ahead y coherencia de las métricas del informe.
+
+### Usar el motor en tiempo real
+
+```python
+from m4_engine import AlertEngine, KellyConfig, StrategySpec, EUROPEAN_37
+
+engine = AlertEngine(
+    spec=StrategySpec(primary_mode="any"),
+    payout=EUROPEAN_37,
+    kelly_config=KellyConfig(fraction=0.25, max_fraction=0.02),
+    bankroll=1000.0,
+)
+
+decision = engine.evaluate({
+    "draw_id": 249408,
+    "last_number": 7,
+    "numbers": {"M1": 3, "M2": 11, "M3": 16, "M4": 9, "M5": 0,
+                "H1": 14, "H2": 5, "H3": 8, "H4": 12, "H5": 17},
+    "probabilities": {"M1": 0.0640, "M2": 0.0610, "M3": 0.0595, "M4": 0.0570,
+                      "M5": 0.0555, "H1": 0.0545, "H2": 0.0535, "H3": 0.0530,
+                      "H4": 0.0525, "H5": 0.0520},
+})
+
+if decision.fired:
+    print(decision.number, decision.confidence, decision.stake.stake_fraction)
+
+engine.observe(decision, resultado_real)  # cierra el ciclo tras el sorteo
+```
+
+`evaluate` no usa el resultado de la ronda: sólo `observe` actualiza los
+estimadores, de modo que el dimensionamiento del stake se basa siempre en
+evidencia ya resuelta.
+
+La demostración completa está en:
+
+```powershell
+python .\ejemplo_alertas_en_vivo.py
+```
+
+### Stake dinámico (Criterio de Kelly defensivo)
+
+`KellyStakeSizer` no aplica Kelly pleno. Encadena cinco cautelas:
+
+1. Encogimiento bayesiano de la tasa de acierto hacia el punto de equilibrio
+   del modelo de pago.
+2. Uso del extremo inferior del intervalo de Wilson en lugar del estimador
+   puntual.
+3. Kelly fraccional (25% por defecto).
+4. Exigencia de ventaja mínima frente al equilibrio.
+5. Tope duro de exposición por ronda y comprobación de que el crecimiento
+   esperado del logaritmo de la riqueza sigue siendo positivo.
+
+Mientras no se acumulen suficientes observaciones y aciertos en la cohorte de
+alertas, el motor no arriesga capital: devuelve `stake = 0`.
+
+### Qué permite y qué no permite el histórico actual
+
+El informe de validación sobre `registros_supervision_probs_120` concluye que:
+
+- La calibración por zonas del PDF se reproduce exactamente: 0% por debajo del
+  5%, 6,46% entre 5% y 7%, 2,19% por encima del 8%, y 13,75% para M4 dentro de
+  la ventana operativa.
+- La lectura literal del «aislamiento de modelo» no emite ninguna alerta: M4
+  alcanza la probabilidad máxima en seis rondas y en ninguna de ellas P(M4) cae
+  dentro de la ventana 5,0%–7,0%.
+- El filtro de dispersión (Δ ≤ 4,7%) descarta cuatro rondas de la ventana,
+  entre ellas dos aciertos, y reduce la tasa observada de 13,75% a 11,84%.
+- El acelerador de anclaje {1, 7, 8} no es estadísticamente significativo
+  (Fisher p = 0,64): se conserva la etiqueta «Crítico», no el aumento de stake.
+- La línea base correcta es 1/19 = 5,26%, no 1/37 = 2,70%: la ventaja real es
+  de 2,6 veces, no de 5 veces.
+- El 29% del log tiene etiquetas no verificables (predicciones reescritas con
+  resultados contradictorios) y debe excluirse de cualquier cálculo.
+- La ventaja está concentrada en el número 2: sin él, la tasa cae a 11,90% y
+  deja de ser significativa frente a 1/19.
+
+Por tanto, la estrategia debe operarse en modo papel, con los umbrales
+congelados, acumulando evidencia fuera de muestra antes de comprometer capital.
