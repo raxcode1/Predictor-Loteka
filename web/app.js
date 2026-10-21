@@ -106,7 +106,7 @@ function renderAlert(data) {
   badge.textContent = fired ? "SEÑAL ACTIVA" : "SIN SEÑAL";
   badge.className = `alert-badge ${fired ? "active" : "idle"}`;
 
-  document.querySelector("#alert-number").textContent = isBlank(alert.number) ? "-" : number(alert.number);
+  document.querySelector("#alert-number").textContent = isBlank(alert.number) ? "00" : number(alert.number);
 
   const details = [];
   if (!isBlank(alert.probability)) details.push(`P(M4)=${percent(alert.probability)}`);
@@ -142,9 +142,10 @@ function renderAlert(data) {
       const result = isBlank(item.actual_number) ? "-" : number(item.actual_number);
       const signal = isBlank(item.hit) ? "-" : item.hit ? "Acierto" : "Fallo";
       const stake = item.stake_applied ? percent(item.stake_fraction) : "0";
+      const num = isBlank(item.number) ? "00" : number(item.number);
       return `<tr>
         <td>${item.source_draw || "-"}</td>
-        <td>${isBlank(item.number) ? "-" : number(item.number)}</td>
+        <td>${num}</td>
         <td>${result}</td>
         <td class="${item.hit ? "hit" : "miss"}">${signal}</td>
         <td>${isBlank(item.probability) ? "-" : percent(item.probability)}</td>
