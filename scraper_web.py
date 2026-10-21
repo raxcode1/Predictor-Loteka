@@ -23,15 +23,19 @@ class ClienteScraper:
     def __init__(self, cache_path: Path | None = None) -> None:
         self.cache_path = cache_path
         self.cache: dict[str, Any] = self._leer_cache()
-        self.proxies: list[str] = [
-            item.strip()
-            for item in os.environ.get("SCRAPER_PROXY_URLS", "").split(",")
-            if item.strip()
-        ]
-        if not self.proxies:
-            unico = os.environ.get("SCRAPER_PROXY_URL", "").strip()
-            if unico:
-                self.proxies = [unico]
+        # No usar proxies si estamos usando Cloudflare Worker
+        if WORKER_URL:
+            self.proxies = []
+        else:
+            self.proxies: list[str] = [
+                item.strip()
+                for item in os.environ.get("SCRAPER_PROXY_URLS", "").split(",")
+                if item.strip()
+            ]
+            if not self.proxies:
+                unico = os.environ.get("SCRAPER_PROXY_URL", "").strip()
+                if unico:
+                    self.proxies = [unico]
         self.indice_proxy = int(self.cache.get("proxy_index", 0) or 0)
 
     def _leer_cache(self) -> dict[str, Any]:

@@ -18,8 +18,12 @@ from config_sync import (
 )
 
 
-URL = "https://loteka.com.do/"
-CSV_PATH = Path(__file__).with_name("Resultados_RuletaExpress.csv")
+import os
+
+URL = os.environ.get("CLOUDFLARE_WORKER_URL", "").strip().rstrip("/") or "https://loteka.com.do"
+if not URL.endswith("/"):
+    URL = URL + "/"
+
 TIME_ZONE = ZoneInfo("America/Santo_Domingo")
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 

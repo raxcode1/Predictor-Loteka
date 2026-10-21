@@ -24,8 +24,12 @@ from m4_engine.kelly import KellyConfig
 from sync_ruleta_express import extract_results, fetch_page
 
 
-ROOT = Path(__file__).resolve().parents[1]
-LOCAL_CSV = ROOT / "Resultados_RuletaExpress.csv"
+import os
+
+URL = os.environ.get("CLOUDFLARE_WORKER_URL", "").strip().rstrip("/") or "https://loteka.com.do"
+if not URL.endswith("/"):
+    URL = URL + "/"
+
 BLOB_PATH = "Resultados_RuletaExpress.csv"
 PREDICTIONS_PATH = "ruleta_predictions.json"
 BLOB_TOKEN = os.environ.get("BLOB_READ_WRITE_TOKEN")

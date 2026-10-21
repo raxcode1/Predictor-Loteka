@@ -1,63 +1,33 @@
-﻿// Cloudflare Worker para proxy de Loteka - Ruleta Express
-// Subir este archivo a Cloudflare Workers
-
+﻿// Cloudflare Worker para proxy de Loteka - Ignorar headers del cliente
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    
-    // URL destino
-    const targetUrl = new URL('https://loteka.com.do' + url.pathname + url.search);
-    
-    // Headers para parecer navegador real
-    const headers = new Headers();
-    headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
-    headers.set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8');
-    headers.set('Accept-Language', 'es-DO,es;q=0.9,en-US;q=0.8,en;q=0.7');
-    headers.set('Accept-Encoding', 'gzip, deflate, br');
-    headers.set('Cache-Control', 'max-age=0');
-    headers.set('Connection', 'keep-alive');
-    headers.set('Referer', 'https://loteka.com.do/');
-    headers.set('Origin', 'https://loteka.com.do');
-    headers.set('Host', 'loteka.com.do');
-    headers.set('Upgrade-Insecure-Requests', '1');
-    headers.set('Sec-Fetch-Dest', 'document');
-    headers.set('Sec-Fetch-Mode', 'navigate');
-    headers.set('Sec-Fetch-Site', 'none');
-    headers.set('Sec-Fetch-User', '?1');
-    headers.set('sec-ch-ua', '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"');
-    headers.set('sec-ch-ua-mobile', '?0');
-    headers.set('sec-ch-ua-platform', '"Windows"');
-    
-    // Pasar headers condicionales para aprovechar caché (ETag)
-    if (request.headers.get('if-none-match')) {
-      headers.set('If-None-Match', request.headers.get('if-none-match'));
-    }
-    if (request.headers.get('if-modified-since')) {
-      headers.set('If-Modified-Since', request.headers.get('if-modified-since'));
-    }
-    
+    const targetUrl = 'https://loteka.com.do/';
+
+    const headers = new Headers({
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+      'Accept-Language': 'es-DO,es;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
+      'Cache-Control': 'max-age=0',
+    });
+
     try {
-      const response = await fetch(targetUrl.toString(), {
+      const response = await fetch(targetUrl, {
         method: 'GET',
         headers: headers,
         redirect: 'follow',
-        cf: {
-          cacheTtl: 0,
-          cacheEverything: false,
-        }
       });
-      
-      // Crear nueva respuesta con headers copiados
+
       const responseHeaders = new Headers(response.headers);
       responseHeaders.set('Access-Control-Allow-Origin', '*');
       responseHeaders.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-      responseHeaders.set('Access-Control-Allow-Headers', 'Content-Type, If-None-Match, If-Modified-Since');
       
-      // Si es OPTIONS para CORS preflight
       if (request.method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: responseHeaders });
       }
-      
+
       return new Response(response.body, {
         status: response.status,
         statusText: response.statusText,
@@ -74,4 +44,5 @@ export default {
     }
   },
 };
+
 

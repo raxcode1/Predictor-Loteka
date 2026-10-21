@@ -38,8 +38,12 @@ except ImportError:
 from live_monitor import LiveMonitor, json_file_store, memory_store
 from m4_engine.kelly import KellyConfig
 
-ROOT = Path(__file__).resolve().parent
-WEB_PATH = ROOT / "web"
+import os
+
+# Cloudflare Worker URL para evitar bloqueos
+CLOUDFLARE_WORKER_URL = os.environ.get("CLOUDFLARE_WORKER_URL", "").strip().rstrip("/")
+LOTTEKA_URL = f"{CLOUDFLARE_WORKER_URL}/" if CLOUDFLARE_WORKER_URL else "https://loteka.com.do/"
+
 CSV_NAME = "Resultados_RuletaExpress.csv"
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 
