@@ -1,72 +1,58 @@
-# Guía para publicar Ruleta Express en Render
+# Guía para publicar Ruleta Express en Render (100% automático)
 
-Esta guía explica cómo publicar el dashboard en Render **sin que Render
-consulte Loteka nunca**, que es la forma más difícil de bloquear por parte de
-Loteka.
+Render monta **todo** el sistema: un *worker* que consulta Loteka y un
+*servicio web* que publica el dashboard. No hace falta que tu PC esté
+encendido.
 
-## 1. La idea: el PC consulta, Render sirve
-
-El bloqueo de Loteka se produce contra los rangos de IP de los centros de
-datos. Vercel, Render, AWS y DigitalOcean están en ese rango. Tu conexión
-residencial, no.
-
-Por eso el proyecto se despliega así:
+El reto es que Render usa IPs de centro de datos, que es justo lo que
+Loteka bloquea. La solución no es un truco, son cuatro capas que juntas
+hacen que el scraping sea indistinguible del de un visitante puntual.
 
 ```text
-   [ Tu PC · IP residencial ]  --scraping-->  Loteka
+   [ Worker en Render ]  --jitter + ETag + proxy-->  Loteka
             |
-            |  HTTPS POST /api/ingest   (token compartido)
+            |  POST /api/ingest  (token)
             v
-   [ Render · sólo sirve el dashboard ]  -->  navegador
+   [ Web Service en Render ]  -->  navegador (dashboard + alerta M4)
 ```
 
-- **Render nunca pide una página a Loteka.** Ni una sola vez. No hay nada que
-  bloquear.
-- **El scraper sigue en tu PC**, que es donde ya funciona y donde la IP no
-  está en la lista negra.
-- Los resultados viajan del PC a Render cifrados y autenticados con un token
-  que sólo tú conoces.
-- El dashboard, la alerta M4 y el registro de predicciones se sirven desde
-  Render, que es rápido, no se duerme mientras lo miras y sobrevive a que
-  cierres el portátil.
+## 1. Las cuatro capas anti-bloqueo
 
-Ventaja añadida: si Render se reinicia, el PC detecta que el servicio perdió
-el estado y le reenvía el histórico completo. No se pierde ni un sorteo.
+| Capa | Qué hace | Por qué ayuda |
+|---|---|---|
+| **1. Proxy de IP residencial** | El worker sale a internet por una IP de casa, no por la de Render | La IP que ve Loteka no es una IP de datacenter. Si esa IP se bloquea, el worker rota a la siguiente del conjunto y sigue trabajando |
+| **2. Jitter** | El intervalo se sortea en una ventana (por defecto 60-180 s) | Un patrón fijo es lo que disparan los detectores de bots. Nunca hay cadencia |
+| **3. Petición condicional (ETag)** | Se manda `If-None-Match`; si la página no cambió, el servidor responde `304` sin cuerpo | El sitio no sirve ni sirve el HTML. Es exactamente lo que hace un navegador al recargar |
+| **4. Interruptor de circuito** | Tras un fallo: 2, 5, 10, 20, 30 minutos de pausa, **persistidos en disco** | No se insiste nunca. Y como la pausa está en disco, un reinicio del worker no la reinicia |
 
-## 2. Requisitos previos
+Además, el scraping va **separado** del dashboard: si un día bloquean la IP
+del worker, el dashboard sigue sirviendo y mostrando los últimos datos
+conocidos, y el worker vuelve a intentarlo solo cuando pasa la pausa.
+
+## 2. Requisitos
 
 - Una cuenta en [Render](https://render.com).
 - Acceso al repositorio `raxcode1/RuletaExpressPredictorLoteka`.
-- Python 3.11 o superior en el PC (para el script de envío).
-- El token compartido que vas a generar en el paso 4.
+- **Un proxy de IP residencial** (recomendado). Sin él el sistema funciona,
+  pero es bloqueable. Ver la sección 6.
 
-## 3. Crear el servicio en Render
+## 3. Crear el servicio web (dashboard)
 
-1. Entra en [dashboard.render.com](https://dashboard.render.com) y pulsa
-   **New > Web Service**.
-2. Conecta el repositorio de GitHub y elige la rama `master`.
-3. Configura el servicio:
+1. [dashboard.render.com](https://dashboard.render.com) → **New > Web Service**.
+2. Conecta el repositorio, rama `master`.
+3. Configuración:
 
    | Campo | Valor |
    |---|---|
    | Name | `ruleta-express` |
-   | Region | Oregon (o el más cercano a ti) |
-   | Branch | `master` |
-   | Root Directory | *(vacío)* |
    | Runtime | Python |
    | Build Command | `pip install -r requirements.txt` |
    | Start Command | `gunicorn render_app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120` |
    | Health Check Path | `/healthz` |
 
-   **Workers: 1.** El estado (histórico, caché del análisis y registro vivo)
-   vive en memoria del proceso. Con más de un worker cada uno tendría una
-   copia distinta y las respuestas no cuadrarían.
+   **Workers: 1**, porque el estado vive en la memoria del proceso.
 
-4. Pulsa **Create Web Service** y espera al primer despliegue.
-
-## 4. Variables de entorno
-
-En **Environment** del servicio añade:
+4. Variables de entorno (**Environment**):
 
 ```text
 PUSH_TOKEN=<secreto largo y aleatorio>
@@ -75,163 +61,183 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=<contraseña larga y única>
 COOKIE_SECURE=1
 REFRESH_INTERVAL_SECONDS=30
+RENDER_DATA_DIR=/var/data        # sólo si montas disco (ver sección 7)
 ```
 
-- `PUSH_TOKEN`: es la llave que abre `/api/ingest`. Debe ser **exactamente**
-  igual a la que pongas en `config_render.py` en el PC. Genera una con
-  `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
-- `SESSION_SECRET`: firma la cookie de sesión (7 días).
-- `ADMIN_USERNAME` / `ADMIN_PASSWORD`: acceso al dashboard.
-- `COOKIE_SECURE=1`: obligatorio en Render (HTTPS). Ponlo en `0` sólo si
-  pruebas en local por HTTP.
-- `REFRESH_INTERVAL_SECONDS`: cada cuánto refresca el navegador. En Render no
-  hace falta cada 45 segundos: los datos llegan cuando el PC empuja, así que
-  30 es suficiente.
+5. **Create Web Service**. Anota la URL (ej. `https://ruleta-express.onrender.com`).
 
-Guarda el `PUSH_TOKEN` en un lugar seguro: lo necesitarás en el paso 6.
+## 4. Crear el worker (scraping automático)
 
-### Disco persistente (opcional, plan de pago)
+1. **New > Background Worker** (no Cron Job: el worker debe vivir siempre
+   activo, un cron de un minuto se bloquea por justa causa y consume cuota).
+2. Mismo repositorio y rama. Configuración:
 
-Sin disco, el servicio arranca con el CSV del repositorio y reconstruye el
-registro vivo al arrancar, y los sorteos que el PC envíe durante el tiempo
-que el servicio estuvo caído se recuperan en el siguiente envío completo.
+   | Campo | Valor |
+   |---|---|
+   | Name | `ruleta-scraper` |
+   | Runtime | Python |
+   | Build Command | `pip install -r requirements.txt` |
+   | Start Command | `python render_worker.py` |
 
-Con disco, el estado sobrevive a los reinicios sin recalcular nada:
-
-1. En el servicio, **Disks > Add Disk** (requiere un plan de pago).
-2. Monta en `/var/data` y define `RENDER_DATA_DIR=/var/data`.
-3. El servicio guardará allí `Resultados_RuletaExpress.csv` y
-   `registro_live.json`.
-
-En el plan gratuito no hay disco: funciona igual, sólo recalcula.
-
-## 5. Comprobar el despliegue
+3. Variables de entorno del worker:
 
 ```text
-https://ruleta-express.onrender.com/healthz      -> {"ok": true, "rows": 28563}
-https://ruleta-express.onrender.com/              -> pantalla de acceso
+WEB_SERVICE_URL=https://ruleta-express.onrender.com
+PUSH_TOKEN=<el mismo PUSH_TOKEN que el del servicio web>
+SCRAPER_INTERVAL_MIN=60
+SCRAPER_INTERVAL_MAX=180
+SCRAPER_BACKOFF_MAX_MIN=30
+SCRAPER_PROXY_URLS=http://usuario:clave@host1:port,http://usuario:clave@host2:port
+RENDER_DATA_DIR=/var/data
 ```
 
-Inicia sesión con `ADMIN_USERNAME` y `ADMIN_PASSWORD`. Verás el dashboard con
-el histórico del repositorio, el análisis de `state_recovery` y la alerta M4
-(la primera carga tarda unos segundos: recalcula el análisis sobre 28 mil
-filas).
+   - `SCRAPER_INTERVAL_MIN/MAX`: ventana del jitter. 60-180 s es un ritmo
+     emulado al de un visitante casual y muy por debajo de lo que un
+     limiter consideraría abusivo. **No los bajes de 30 s.**
+   - `SCRAPER_PROXY_URLS`: lista de proxies separados por comas. El worker
+     rota al siguiente cuando uno falla. Si se deja vacío, sale directo con
+     la IP de Render (funciona, pero es lo bloqueable).
 
-## 6. Configurar el PC para que empuje los datos
+4. **Create Background Worker**.
 
-En `config_render.py` (archivo local, no se sube):
+## 5. Probar que funciona
 
-```python
-URL_RENDER = "https://ruleta-express.onrender.com"
-TOKEN_RENDER = "<el mismo PUSH_TOKEN que pusiste en Render>"
+```text
+https://ruleta-express.onrender.com/healthz
 ```
 
-Guarda el archivo y arranca el bucle:
+Debe devolver `{"ok": true, "rows": 28563}`. Entra en la web con
+`ADMIN_USERNAME` y `ADMIN_PASSWORD`.
+
+En los **logs del worker** debe aparecer cada uno o dos minutos:
+
+```text
+Consulta ok · publicados=204 · histórico=28563 (+1)
+Enviado a https://ruleta-express.onrender.com: 28564 sorteos, último No. 249493.
+```
+
+Si ves `304 sin cambios`, la capa condicional está funcionando: el sitio no
+sirvió el HTML porque no había nada nuevo.
+
+## 6. El proxy de IP residencial (lo importante)
+
+Sin proxy, la petición sale desde la IP de Render. Con proxy, sale desde una
+IP residencial: para el sitio es indistinguible de un visitante más.
+
+Cualquier servicio de scraping con IPs residenciales sirve (ScraperAPI,
+Zyte, Apify, o un proxy doméstico propio). Lo único que necesita el proyecto
+es una URL con usuario y clave:
+
+```text
+http://usuario:clave@host:puerto
+```
+
+- Con **uno solo**: el worker sale por esa IP. Si la bloquean, entra la pausa
+  de 30 minutos y vuelve a intentarlo. Es un mal día, no una caída.
+- Con **varios** (`SCRAPER_PROXY_URLS` con comas): el worker rota al
+  siguiente cuando uno falla. Un bloqueo sólo mata una dirección. Esto es lo
+  que hace que el sistema sea **difícil de bloquear**: no hay una sola IP que
+  pueda caerse.
+
+Genera los tokens con:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+## 7. Disco persistente (opcional, plan de pago)
+
+Sin disco, el worker arranca con el CSV del repositorio y el servicio web
+reconstruye el registro vivo al calcular. Los sorteos que se pierdan durante
+un reinicio los recupera el envío completo que el worker detecta y repite.
+
+Con disco, en cada servicio: **Disks > Add Disk**, montar en `/var/data` y
+definir `RENDER_DATA_DIR=/var/data`. El worker guarda ahí el histórico y su
+estado de pausas; el servicio web, el registro vivo.
+
+## 8. Tu PC deja de ser necesario
+
+Con el worker desplegado, el bucle del PC es **opcional**. Sigue siendo útil
+como red de seguridad:
+
+- Si el worker se queda bloqueado, el PC (IP residencial, sin proxy)
+  sigue alimentando el dashboard.
+- El PC hace commits locales del CSV, así que el histórico nunca depende de
+  la nube.
+
+Si lo mantienes activo, configura `config_render.py` con la URL y el token
+del servicio web, y ejecuta:
 
 ```powershell
 python .\sync_local_loop.py
 ```
 
-El bucle ahora hace tres cosas:
+El bucle empuja los sorteos al mismo endpoint `/api/ingest`. Si el worker y
+el PC empujan a la vez, da igual: la ingesta deduplica por número de sorteo.
 
-1. Consulta Loteka desde tu IP residencial, con intervalo jitterizado
-   (20-60 segundos).
-2. Guarda los resultados nuevos en un commit local.
-3. **Empuja los sorteos nuevos a Render** en cuanto aparecen.
+## 9. Problemas frecuentes
 
-Los envíos son incrementales: sólo viaja lo nuevo. Cada 20 ciclos (unos 15-20
-minutos) se manda además el histórico completo, y también se manda completo
-de inmediato si el servicio responde con menos filas de las que tiene el PC
-(eso delata un reinicio del servicio).
+### El worker se queda dormido
 
-### Probar el envío a mano
+El plan gratuito de Render apaga las instancias tras 15 minutos sin
+actividad. El worker nunca está inactivo (consulta cada 1-3 minutos), pero
+si lo ves apagado, el plan de pago lo evita. Tras despertarse, el primer
+ciclo tarda lo que le reste de la ventana de jitter.
 
-```powershell
-python -c "import push_render, pandas as pd; f=pd.read_csv('Resultados_RuletaExpress.csv',dtype=str).fillna(''); print(push_render.sincronizar(f[['Fecha','Hora','No_Sorteo','Numero']].to_dict(orient='records')))"
-```
+### `Pausa activa: N s restantes` en los logs
 
-## 7. Medidas anti-bloqueo
+Es el interruptor de circuito funcionando: el scraping falló y el worker está
+esperando antes de reintentar. No es un error del proyecto; es la protección
+contra insistir. Si dura más de 30 minutos, revisa que el proxy funciona
+(probable causa: proxy caducado o credenciales mal).
 
-Todo lo que hace el proyecto para que Loteka no lo bloquee:
+### El dashboard no actualiza
 
-| Medida | Dónde | Efecto |
-|---|---|---|
-| Cero tráfico desde IPs de datacenter | `render_app.py` no consulta Loteka | No hay IP bloqueable |
-| Intervalo jitterizado de 20-60 s | `config_sync.py` | Nada de cadencias fijas |
-| Un solo número por consulta, con caché de 4 rondas | `sync_ruleta_express.py` | 1 petición cada ~4 sorteos |
-| User-Agent honesto y descriptive | `sync_ruleta_express.py` | No se disimula un bot |
-| Espera exponencial tras un fallo | `sync_local_loop.py` | Nunca se insiste en bucle |
-| Pausa larga de 30 min tras 5 fallos seguidos | `sync_local_loop.py` | Se cede el paso si el origen dice basta |
-| Historial en el PC como fuente de verdad | `Resultados_RuletaExpress.csv` | Un bloqueo no borra datos |
-
-**Lo que NO hace el proyecto**, y que conviene no añadir: rotación de
-User-Agent, proxies, rotación de IP, ni reintentos agresivos. Todo eso
-convierte un scraping cortés en un abuso y garantiza el bloqueo.
-
-### ¿Y si Render se usa como scraper de respaldo?
-
-Se puede añadir un Cron Job de Render que consulte Loteka, **pero no se
-recomienda**: su IP es de datacenter y es exactamente lo que Loteka bloquea.
-Si alguna vez lo usas, ponle un intervalo amplio (15 minutos), un jitter
-grande y que nunca compita con el PC. El diseño con el PC como única fuente
-de scraping es el que resiste.
-
-## 8. Problemas frecuentes
-
-### El dashboard muestra «Sin conexión» o tarda
-
-El plan gratuito de Render apaga el servicio tras 15 minutos sin tráfico. La
-primera visita tras un rato tarda unos 30 segundos (arranque en frío +
-recalculo del análisis). El plan de pago evita la espera.
+1. Mira los logs del worker: ¿hay `Consulta ok`? Si no, el problema es de
+   red hacia Loteka.
+2. ¿Hay `Enviado a ...`? Si no, el problema es del worker hacia el servicio
+   web: revisa `WEB_SERVICE_URL` y `PUSH_TOKEN`.
+3. Si ambos están bien, el servicio web habrá merged los datos: comprueba
+   `/healthz` y que `rows` crezca.
 
 ### `/api/ingest` devuelve 401
 
-El `PUSH_TOKEN` del PC y el de Render no coinciden. Se comparan con
-`hmac.compare_digest`, así que distingue mayúsculas y espacios.
+El `PUSH_TOKEN` del worker y el del servicio web no coinciden (se comparan
+con `hmac.compare_digest`: distingue mayúsculas y espacios).
 
-### `/api/ingest` devuelve 503
+### El proxy no funciona
 
-`PUSH_TOKEN` no está definido en el entorno del servicio.
-
-### El PC no manda nada
-
-Comprueba que `URL_RENDER` y `TOKEN_RENDER` no están vacíos en
-`config_render.py` y que el bucle se reinició después de editarlos (el
-script los lee al arrancar). En la salida del bucle debe verse
-«Render actualizado: N sorteos».
-
-### Los datos del panel no cuadran con el CSV
-
-El PC es la fuente de verdad. Si Render muestra menos filas, el siguiente
-envío completo lo corrige (o borra `estado_push_render.json` en el PC para
-forzar el envío completo en el siguiente ciclo).
-
-### Render se reinició y perdió los datos
-
-No debería pasar: el siguiente push del PC detecta que el servicio tiene
-menos filas y reenvía el histórico completo. Si quieres forzarlo:
+Prueba el proxy con `curl` antes de culpar al worker:
 
 ```powershell
-Remove-Item .\estado_push_render.json
+curl.exe -x "http://usuario:clave@host:puerto" https://loteka.com.do/ -o nul -w "%{http_code}"
 ```
 
-## 9. Render frente a Vercel
+Debe devolver `200`.
 
-| | Vercel | Render |
+## 10. Lo que este proyecto no hace
+
+Y no conviene añadir: rotación de User-Agent, resolución DNS exótica,
+captcha solving ni reintentos agresivos. Todo eso convierte un scraping
+cortés en un abuso y garantiza el bloqueo. El objetivo aquí es **volumen bajo
+y patrón natural**, no camuflarse.
+
+## 11. Render frente a Vercel
+
+| | Vercel | Render (worker + web) |
 |---|---|---|
-| Modelo | funciones serverless | servicio web persistente |
-| Scraper | dentro de la función (IP de datacenter) | sólo en el PC (IP residencial) |
+| Automático sin PC | sí (scraping desde datacenter) | sí (scraping desde worker, con proxy opcional) |
+| Scraper | dentro de la función | worker dedicado, con pausa persistida |
+| Resiliencia a un bloqueo | la función sigue fallando | el dashboard sobrevive; el worker reintenta |
 | Estado | Vercel Blob | disco o memoria, reconstruido |
-| Latencia | arranque en frío | proceso vivo, 30 s de refresco |
-| Riesgo de bloqueo | alto | prácticamente nulo |
-| Archivos | `api/dashboard.py`, `vercel.json` | `render_app.py` |
+| Ritmo de refresco | 45 s | 30 s |
 
-Puedes usar los dos a la vez: Vercel para tener una URL de respaldo y Render
-como principal. El bucle del PC sólo tiene que apuntar a uno.
+Puedes usar los dos a la vez: Vercel como URL de respaldo y Render como
+principal.
 
-## 10. Actualizar el sitio
+## 12. Actualizar el sitio
 
-Render se redespliega automáticamente con cada `git push` a `master`:
+Render redespliega con cada `git push` a `master`:
 
 ```powershell
 git add .
@@ -239,6 +245,6 @@ git commit -m "Actualizar dashboard de Ruleta Express"
 git push
 ```
 
-Recuerda que el bucle local **no** hace `git push`: los commits de resultados
-se acumulan en local y los subes cuando quieras, para no disparar despliegues
-en cada sorteo.
+El bucle local **no** hace `git push`: los commits de resultados se acumulan
+en local y los subes cuando quieras, para no disparar despliegues en cada
+sorteo.

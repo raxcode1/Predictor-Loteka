@@ -22,10 +22,14 @@ postprocesamiento, como anti-repetición.
 - `GUIA_IMPORTAR_VERCEL.md`: guía paso a paso para importar y configurar el
   proyecto en Vercel.
 - `GUIA_IMPORTAR_RENDER.md`: guía paso a paso para publicar el dashboard en
-  Render sin que Render consulte Loteka (el PC consulta y empuja los datos).
+  Render con scraping automático en un worker.
 - `render_app.py`: servicio web para Render (dashboard, API e ingesta).
+- `render_worker.py`: worker de Render que consulta Loteka y empuja los
+  resultados al servicio web.
+- `scraper_web.py`: cliente HTTP del scraper (proxy rotatorio, `ETag` y
+  jitter).
 - `push_render.py` y `config_render.py`: cliente y configuración del envío de
-  resultados del PC a Render.
+  resultados a Render.
 - `m4_engine/`: motor cuantitativo M4 (alertas de alta ventaja, validación
   empírica y stake dinámico).
 - `live_models.py`: matriz en vivo de diez submodelos (sustituta del ensemble
@@ -349,18 +353,24 @@ Los cambios también afectan a la versión de Vercel, que lee el mismo archivo.
 
 ## Publicar en Render (recomendado frente a Vercel)
 
-Render puede servir el dashboard **sin consultar Loteka nunca**: el scraper
-sigue en tu PC (IP residencial) y empuja los resultados al servicio por HTTPS
-con un token compartido. Como los bloqueos de Loteka se producen contra las IP
-de los centros de datos, esta arquitectura es la más difícil de bloquear.
+Render monta el sistema completo: un **Background Worker** que consulta
+Loteka y un **Web Service** que publica el dashboard. No hace falta que tu PC
+esté encendido.
+
+El scraping va protegido por cuatro capas: proxy de IP residencial
+rotatorio, intervalo sorteado (jitter), petición condicional con `ETag` y un
+interruptor de circuito con pausas persistidas en disco. El scraping está
+separado del dashboard: si un día bloquean la IP del worker, la web sigue
+sirviendo los últimos datos y el worker reintenta solo.
 
 ```powershell
-# En el PC: configura la URL y el token en config_render.py y arranca el bucle
+# En el PC, sólo si quieres mantenerlo como red de seguridad (opcional)
 python .\sync_local_loop.py
 ```
 
-La guía completa (crear el servicio, variables de entorno, disco persistente,
-medidas anti-bloqueo, comparación con Vercel y problemas frecuentes) está en
+La guía completa (crear los dos servicios, variables de entorno, proxies,
+disco persistente, medidas anti-bloqueo, comparación con Vercel y problemas
+frecuentes) está en
 [GUIA_IMPORTAR_RENDER.md](./GUIA_IMPORTAR_RENDER.md).
 
 ## Publicar en Vercel
