@@ -1,0 +1,29 @@
+﻿INSTRUCCIONES PARA SUBIR EL WORKER A CLOUDFLARE
+
+1. Ve a https://dash.cloudflare.com/
+2. Selecciona Workers & Pages > Create application > Create Worker
+3. Dale un nombre a tu Worker (ej: ruleta-loteka-proxy)
+4. Click en "Deploy" (con el código por defecto)
+5. Una vez desplegado, click en "Edit code"
+6. Borra todo el código que aparece
+7. Copia y pega TODO el contenido del archivo: cloudflare-worker-loteka.js
+8. Click en "Save and deploy"
+
+LISTO - Obtendrás una URL como:
+https://ruleta-loteka-proxy.TU-SUBDOMINIO.workers.dev
+
+AHORA CONECTA TU PROYECTO AL WORKER:
+
+Para Vercel:
+- Ve a tu proyecto > Settings > Environment Variables
+- Agrega: CLOUDFLARE_WORKER_URL = https://tu-worker-url.workers.dev
+- Ve a Deployments > Redeploy
+
+Para Render:
+- En Web Service y Background Worker agrega: CLOUDFLARE_WORKER_URL = https://tu-worker-url.workers.dev
+- Reinicia ambos servicios
+
+Para probar localmente:
+- Agrega a tu .env: CLOUDFLARE_WORKER_URL=https://tu-worker-url.workers.dev
+
+El proyecto YA está modificado para usar esta variable automáticamente.

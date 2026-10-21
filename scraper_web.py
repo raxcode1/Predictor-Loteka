@@ -1,40 +1,25 @@
-"""Cliente HTTP del scraper: proxy rotatorio, petición condicional y caché.
-
-Tres mecanismos que reducen la huella del scraping:
-
-1. **Petición condicional** (`ETag` / `If-Modified-Since`): si la página no
-   ha cambiado, el servidor responde `304` sin cuerpo. Es exactamente lo que
-   hace un navegador al recargar, y el sitio no sirve ni sirve el HTML.
-2. **Proxy rotatorio**: el tráfico puede salir por una IP residencial
-   (`SCRAPER_PROXY_URLS`, lista separada por comas) en lugar de la IP del
-   datacenter. Si una IP acaba bloqueada, la siguiente del conjunto sigue
-   funcionando.
-3. **Jitter**: el intervalo entre peticiones se sortea dentro de una ventana,
-   de modo que nunca hay cadencia fija.
-
-Nada de esto aumenta el volumen de peticiones: el objetivo es que el patrón
-sea indistinguible del de un visitante puntual.
-"""
-
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
 import random
+import time
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 
-URL = "https://loteka.com.do/"
-USER_AGENT = (
-    "Mozilla/5.0 (compatible; RuletaExpressCSV/1.0; +https://loteka.com.do/)"
-)
+# Usar Cloudflare Worker si está configurado
+WORKER_URL = os.environ.get("CLOUDFLARE_WORKER_URL", "").strip().rstrip("/")
+if WORKER_URL:
+    URL = f"{WORKER_URL}/"
+else:
+    URL = "https://loteka.com.do/"
+
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
 
 class ClienteScraper:
-    """Descarga la página pública de Loteka de forma condicionada y con proxy."""
-
     def __init__(self, cache_path: Path | None = None) -> None:
         self.cache_path = cache_path
         self.cache: dict[str, Any] = self._leer_cache()
@@ -49,13 +34,12 @@ class ClienteScraper:
                 self.proxies = [unico]
         self.indice_proxy = int(self.cache.get("proxy_index", 0) or 0)
 
-    # ------------------------------------------------------------------
     def _leer_cache(self) -> dict[str, Any]:
         if not self.cache_path or not self.cache_path.exists():
             return {}
         try:
             data = json.loads(self.cache_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except Exception:
             return {}
         return data if isinstance(data, dict) else {}
 
@@ -65,44 +49,32 @@ class ClienteScraper:
         self.cache["proxy_index"] = self.indice_proxy
         try:
             self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-            self.cache_path.write_text(
-                json.dumps(self.cache, ensure_ascii=False), encoding="utf-8"
-            )
-        except OSError:
+            self.cache_path.write_text(json.dumps(self.cache, ensure_ascii=False), encoding="utf-8")
+        except Exception:
             pass
 
-    # ------------------------------------------------------------------
     def proxy_actual(self) -> str | None:
         if not self.proxies:
             return None
         return self.proxies[self.indice_proxy % len(self.proxies)]
 
     def siguiente_proxy(self) -> None:
-        """Avanza al siguiente proxy del conjunto (rotación al fallar)."""
         if not self.proxies:
             return
         self.indice_proxy = (self.indice_proxy + 1) % len(self.proxies)
         self._guardar_cache()
 
     def _abrir(self, proxy: str | None):
-        handlers = (
-            [ProxyHandler({"http": proxy, "https": proxy})] if proxy else []
-        )
+        handlers = [ProxyHandler({"http": proxy, "https": proxy})] if proxy else []
         return build_opener(*handlers)
 
-    # ------------------------------------------------------------------
     def descargar(self, forzar_completo: bool = False) -> tuple[str | None, bool]:
-        """Descarga la página.
-
-        Devuelve ``(html, no_modificado)``. Si el servidor responde `304`, se
-        reutiliza el HTML de la última descarga.
-
-        Con ``forzar_completo`` se omite la petición condicional: se pide la
-        página entera, sin cabecera `ETag`. Es lo que se hace al reabrir tras
-        la pausa nocturna, para arrancar con todo el contenido y no con un
-        `304` sobre una caché de hace nueve horas.
-        """
-        headers = {"User-Agent": USER_AGENT, "Accept": "text/html"}
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "es-DO,es;q=0.9,en;q=0.8",
+            "Connection": "keep-alive",
+        }
         if not forzar_completo:
             if self.cache.get("etag"):
                 headers["If-None-Match"] = str(self.cache["etag"])
@@ -112,7 +84,7 @@ class ClienteScraper:
         request = Request(URL, headers=headers)
         opener = self._abrir(self.proxy_actual())
         try:
-            with opener.open(request, timeout=30) as response:
+            with opener.open(request, timeout=60) as response:
                 html = response.read().decode("utf-8", errors="replace")
                 self.cache["etag"] = response.headers.get("ETag")
                 self.cache["last_modified"] = response.headers.get("Last-Modified")
@@ -123,17 +95,31 @@ class ClienteScraper:
         except HTTPError as error:
             if error.code == 304:
                 return self.cache.get("html"), True
+            if error.code == 403:
+                try:
+                    headers_min = {"User-Agent": USER_AGENT}
+                    request = Request(URL, headers=headers_min)
+                    with opener.open(request, timeout=60) as response:
+                        html = response.read().decode("utf-8", errors="replace")
+                        self.cache["etag"] = response.headers.get("ETag")
+                        self.cache["last_modified"] = response.headers.get("Last-Modified")
+                        self.cache["html"] = html
+                        self.cache["actualizado"] = time_stamp()
+                        self._guardar_cache()
+                        return html, False
+                except HTTPError as e2:
+                    if e2.code == 304:
+                        return self.cache.get("html"), True
+                    raise
             raise
 
 
 def time_stamp() -> str:
     from datetime import datetime, timezone
-
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def intervalo_jitter(minimo: int, maximo: int) -> int:
-    """Sortea un intervalo dentro de la ventana configurada."""
     if maximo <= minimo:
         return max(5, minimo)
     return random.randint(minimo, maximo)
