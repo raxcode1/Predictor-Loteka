@@ -343,6 +343,16 @@ class LiveMonitor:
         number: int,
         forecast: LiveForecast,
     ) -> dict:
+        markov_list = list(forecast.markov)
+        heuristic_list = list(forecast.heuristic)
+        markov_forecast = [
+            {"number": int(n), "probability": float(forecast.probabilities.get(n, 0.0))}
+            for n, _ in markov_list[:5]
+        ]
+        heuristic_forecast = [
+            {"number": int(n), "probability": float(forecast.probabilities.get(n, 0.0))}
+            for n, _ in heuristic_list[:5]
+        ]
         return {
             "source_draw": label,
             "source_number": number,
@@ -352,8 +362,10 @@ class LiveMonitor:
                 "numbers": dict(forecast.numbers),
                 "probabilities": dict(forecast.probabilities),
             },
-            "markov": list(forecast.markov),
-            "heuristic": list(forecast.heuristic),
+            "markov": markov_list,
+            "heuristic": heuristic_list,
+            "markov_forecast": markov_forecast,
+            "heuristic_forecast": heuristic_forecast,
             "decision": {},
             "status": STATUS_PENDIENTE,
             "observed_draw": None,
