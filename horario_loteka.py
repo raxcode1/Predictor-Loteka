@@ -1,6 +1,6 @@
 """Horario de publicación de Ruleta Express (hora de República Dominicana).
 
-Loteka publica Ruleta Express en una ventana acotada: **abre a las 07:00** y
+Loteka publica Ruleta Express en una ventana acotada: **abre a las 05:00** y
 **cierra a las 22:00** (hora de Santo Domingo, UTC-4). Fuera de esa ventana no
 hay sorteos nuevos, así que el scraper **no consulta**: se duerme hasta la
 apertura.
@@ -27,8 +27,8 @@ from zoneinfo import ZoneInfo
 #: Zona horaria de República Dominicana.
 ZONA = ZoneInfo("America/Santo_Domingo")
 
-#: Hora de apertura de la publicación (07:00).
-HORA_APERTURA = time(7, 0)
+#: Hora de apertura de la publicación (05:00).
+HORA_APERTURA = time(5, 0)
 
 #: Hora de cierre de la publicación (22:00).
 HORA_CIERRE = time(22, 0)
