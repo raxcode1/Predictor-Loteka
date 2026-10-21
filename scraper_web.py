@@ -91,17 +91,23 @@ class ClienteScraper:
         return build_opener(*handlers)
 
     # ------------------------------------------------------------------
-    def descargar(self) -> tuple[str | None, bool]:
+    def descargar(self, forzar_completo: bool = False) -> tuple[str | None, bool]:
         """Descarga la página.
 
         Devuelve ``(html, no_modificado)``. Si el servidor responde `304`, se
         reutiliza el HTML de la última descarga.
+
+        Con ``forzar_completo`` se omite la petición condicional: se pide la
+        página entera, sin cabecera `ETag`. Es lo que se hace al reabrir tras
+        la pausa nocturna, para arrancar con todo el contenido y no con un
+        `304` sobre una caché de hace nueve horas.
         """
         headers = {"User-Agent": USER_AGENT, "Accept": "text/html"}
-        if self.cache.get("etag"):
-            headers["If-None-Match"] = str(self.cache["etag"])
-        if self.cache.get("last_modified"):
-            headers["If-Modified-Since"] = str(self.cache["last_modified"])
+        if not forzar_completo:
+            if self.cache.get("etag"):
+                headers["If-None-Match"] = str(self.cache["etag"])
+            if self.cache.get("last_modified"):
+                headers["If-Modified-Since"] = str(self.cache["last_modified"])
 
         request = Request(URL, headers=headers)
         opener = self._abrir(self.proxy_actual())

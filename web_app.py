@@ -15,6 +15,7 @@ import pandas as pd
 
 import config_alertas
 import state_recovery
+import horario_loteka
 from config_sync import INTERVALO_SINCRONIZACION, descripcion
 from live_monitor import LiveMonitor, json_file_store
 from m4_engine.kelly import KellyConfig
@@ -73,6 +74,7 @@ class DashboardState:
                 "recovery": self.recovery,
                 "recovery_error": self.recovery_error,
                 "refresh_interval_seconds": SYNC_INTERVAL,
+                "horario": horario_loteka.estado(),
             }
             payload.update(self.monitor.payload())
             return payload
@@ -96,6 +98,21 @@ def latest_draw() -> str | None:
 
 def sync_loop(state: DashboardState) -> None:
     while True:
+        # Horario de publicación de Loteka (07:00-22:00, hora de R. Dominicana).
+        # Fuera de esa ventana no se consulta el origen: el panel sigue
+        # sirviendo los datos guardados y se reanuda al abrir.
+        if not horario_loteka.abierto():
+            local = horario_loteka.ahora()
+            with state.lock:
+                state.sync_error = None
+            print(
+                f"Loteka cerrado ({local.strftime('%H:%M')} DR): "
+                f"se espera hasta las {horario_loteka.HORA_APERTURA.strftime('%H:%M')} DR.",
+                flush=True,
+            )
+            time.sleep(min(horario_loteka.segundos_hasta_apertura(), 300))
+            continue
+
         try:
             with state.lock:
                 previous_draw = state.last_draw

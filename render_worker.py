@@ -14,6 +14,12 @@ Ciclo de trabajo:
 5. Ante un fallo, aplica espera exponencial (hasta 30 minutos) y **persiste**
    el estado del bloqueo, de modo que un reinicio no reinicie la penalización.
 
+Además, el worker respeta el **horario de publicación de Loteka**: abre a
+las 07:00 y cierra a las 22:00 (hora de República Dominicana). Fuera de esa
+ventana no se consulta el origen: el worker duerme hasta la apertura y, al
+reabrir, **arranca con todo** (descarga completa ignorando la petición
+condicional y envío completo del histórico).
+
 El worker nunca se salta la pausa aunque se reinicie: por eso el estado vive
 en disco, no en memoria.
 """
@@ -29,6 +35,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import horario_loteka
 from push_render import enviar
 from scraper_web import ClienteScraper, intervalo_jitter
 from sync_ruleta_express import EXPECTED_COLUMNS, extract_results
@@ -127,21 +134,25 @@ def enviar_envio(
     rows: list[dict[str, str]],
     url: str,
     token: str,
+    forzar_completo: bool = False,
 ) -> dict:
     """Envía sólo lo nuevo; si el servicio perdió el estado, envía el todo.
 
     El servicio responde con cuántas filas tiene. Si tiene menos de las que
     tiene el worker (se reinició y perdió la memoria), se reenvía el
     histórico completo en el siguiente intento.
+
+    Con ``forzar_completo`` se manda todo el histórico, sin importar el
+    último envío: es lo que ocurre al reabrir tras la pausa nocturna.
     """
     ultimo = estado.get("ultimo_envio_sorteo", "")
-    if ultimo:
+    if ultimo and not forzar_completo:
         limite = numero_sorteo(ultimo)
         delta = [row for row in rows if numero_sorteo(row.get("No_Sorteo", "")) > limite]
     else:
         delta = list(rows)
 
-    respuesta = enviar(url, token, delta, full=not ultimo)
+    respuesta = enviar(url, token, delta, full=forzar_completo or not ultimo)
     recibido = int(respuesta.get("rows", 0) or 0)
     if recibido < len(rows):
         respuesta = enviar(url, token, rows, full=True)
@@ -173,7 +184,33 @@ def main() -> None:
         )
 
     ciclo = 0
+    # Al reabrir tras la pausa nocturna se arranca con todo: descarga sin
+    # petición condicional y envío completo del histórico.
+    arranque_completo = False
     while True:
+        # 0. Horario de publicación de Loteka (07:00-22:00, hora de R. Dominicana).
+        if not horario_loteka.abierto():
+            local = horario_loteka.ahora()
+            estado["horario"] = "cerrado"
+            estado["proxima_apertura"] = horario_loteka.proxima_apertura().isoformat(
+                timespec="seconds"
+            )
+            guardar_estado(estado)
+            print(
+                f"Loteka cerrado ({local.strftime('%H:%M')} DR). "
+                f"Se duerme hasta las {horario_loteka.HORA_APERTURA.strftime('%H:%M')} DR.",
+                flush=True,
+            )
+            horario_loteka.esperar_hasta_apertura()
+            arranque_completo = True
+            estado["horario"] = "abierto"
+            print(
+                "Apertura de Loteka: se retoma el scraping con descarga y "
+                "envío completos.",
+                flush=True,
+            )
+            continue
+
         # 1. Pausa vigente (persistida: sobrevive a los reinicios).
         if pausa_hasta:
             try:
@@ -186,14 +223,28 @@ def main() -> None:
                 time.sleep(min(restante, 60))
                 continue
 
-        # 2. Espera jitterizada.
-        espera = intervalo_jitter(INTERVALO_MIN, INTERVALO_MAX)
-        print(f"Esperando {espera} s antes de consultar...", flush=True)
-        time.sleep(espera)
+        # 2. Espera jitterizada (al abrir se consulta de inmediato).
+        if arranque_completo:
+            print("Apertura: consulta inmediata, sin espera previa.", flush=True)
+        else:
+            espera = intervalo_jitter(INTERVALO_MIN, INTERVALO_MAX)
+            print(f"Esperando {espera} s antes de consultar...", flush=True)
+            time.sleep(espera)
+            if not horario_loteka.abierto():
+                # La espera cruzó el cierre: no se inicia una consulta fuera
+                # del horario de publicación.
+                print(
+                    "Se alcanzó el cierre de Loteka durante la espera: "
+                    "no se consulta.",
+                    flush=True,
+                )
+                continue
+        completa = arranque_completo
+        arranque_completo = False
         ciclo += 1
 
         try:
-            html, no_modificado = cliente.descargar()
+            html, no_modificado = cliente.descargar(forzar_completo=completa)
             if html is None:
                 raise RuntimeError("La página no está disponible.")
             nuevos = extract_results(html)
@@ -209,7 +260,8 @@ def main() -> None:
             print(
                 f"Consulta ok · publicados={len(nuevos)} · "
                 f"histórico={len(rows)} (+{len(rows) - before})"
-                + (" · 304 sin cambios" if no_modificado else ""),
+                + (" · 304 sin cambios" if no_modificado else "")
+                + (" · descarga completa" if completa else ""),
                 flush=True,
             )
         except Exception as error:
@@ -234,13 +286,20 @@ def main() -> None:
         # 3. Envío al servicio web.
         if WEB_SERVICE_URL and PUSH_TOKEN:
             try:
-                respuesta = enviar_envio(estado, rows, WEB_SERVICE_URL, PUSH_TOKEN)
+                respuesta = enviar_envio(
+                    estado,
+                    rows,
+                    WEB_SERVICE_URL,
+                    PUSH_TOKEN,
+                    forzar_completo=completa,
+                )
                 estado["ultimo_envio"] = ahora().isoformat(timespec="seconds")
                 estado["ultimo_envio_filas"] = respuesta.get("rows", len(rows))
                 estado["ultimo_envio_sorteo"] = respuesta.get("last_draw")
                 print(
                     f"Enviado a {WEB_SERVICE_URL}: {respuesta.get('rows')} sorteos, "
-                    f"último {respuesta.get('last_draw')}.",
+                    f"último {respuesta.get('last_draw')}"
+                    + (" · envío completo" if completa else "") + ".",
                     flush=True,
                 )
             except Exception as error:

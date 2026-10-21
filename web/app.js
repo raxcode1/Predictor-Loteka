@@ -16,11 +16,16 @@ function render(data) {
     ? `sync: ${new Date(data.last_sync).toLocaleTimeString()}`
     : "sin sincronización";
 
+  const intervaloSeconds = Math.round(refreshIntervalMs / 1000);
+  const cerrado = Boolean(data.horario) && data.horario.abierto === false;
   document.querySelector("#sync-dot").classList.toggle("error", Boolean(data.sync_error));
-  const intervalSeconds = Math.round(refreshIntervalMs / 1000);
   document.querySelector("#sync-status").textContent = data.sync_error
     ? `Error: ${data.sync_error}`
-    : `Sincronización activa · cada ${intervalSeconds} s`;
+    : cerrado
+    ? "Scraping en pausa · fuera del horario de Loteka"
+    : `Sincronización activa · cada ${intervaloSeconds} s`;
+
+  renderHorario(data.horario);
 
   document.querySelector("#latest-result").textContent = latest ? number(latest.Numero) : "-";
   document.querySelector("#latest-meta").textContent = latest
@@ -32,6 +37,22 @@ function render(data) {
   renderAlert(data);
   renderPredictions(data);
   renderPauses(data.pauses);
+}
+
+function renderHorario(horario) {
+  const target = document.querySelector("#horario-status");
+  if (!horario) {
+    target.textContent = "";
+    return;
+  }
+  const ventana = `${horario.apertura}-${horario.cierre} DR`;
+  if (horario.abierto) {
+    const cierra = Math.max(0, Math.round((horario.segundos_hasta_cierre || 0) / 60));
+    target.textContent = `Loteka abierto · cierra en ${cierra} min`;
+    return;
+  }
+  const abre = Math.max(0, Math.round((horario.segundos_hasta_apertura || 0) / 60));
+  target.textContent = `Loteka cerrado (${ventana}) · abre en ${abre} min`;
 }
 
 function renderRecovery(recovery, recoveryError) {

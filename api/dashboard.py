@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 import config_alertas
 import state_recovery
+import horario_loteka
 try:
     from auth_utils import authorized
 except ImportError:
@@ -166,18 +167,22 @@ def recovery_for_rows(rows: list[dict[str, str]]) -> dict:
 def dashboard() -> dict:
     rows = read_rows()
     error: str | None = None
-    try:
-        current = merge_results(rows, extract_results(fetch_page()))
-        if BLOB_TOKEN and serialize_rows(current) != serialize_rows(rows):
-            blob_request(
-                "PUT",
-                BLOB_PATH,
-                serialize_rows(current),
-                "text/csv; charset=utf-8",
-            )
-        rows = current
-    except Exception as exception:
-        error = str(exception)
+    horario = horario_loteka.estado()
+    # Fuera del horario de publicación (07:00-22:00, hora de R. Dominicana)
+    # no se consulta el origen: se sirven los datos guardados.
+    if horario["abierto"]:
+        try:
+            current = merge_results(rows, extract_results(fetch_page()))
+            if BLOB_TOKEN and serialize_rows(current) != serialize_rows(rows):
+                blob_request(
+                    "PUT",
+                    BLOB_PATH,
+                    serialize_rows(current),
+                    "text/csv; charset=utf-8",
+                )
+            rows = current
+        except Exception as exception:
+            error = str(exception)
 
     recovery_error: str | None = None
     recovery = None
@@ -207,6 +212,7 @@ def dashboard() -> dict:
         "alert_history": monitor_payload.get("alert_history", []),
         "prediction_stats": monitor_payload.get("prediction_stats"),
         "refresh_interval_seconds": INTERVALO_SINCRONIZACION,
+        "horario": horario,
     }
 
 

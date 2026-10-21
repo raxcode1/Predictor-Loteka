@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+import horario_loteka
 from config_sync import (
     INTERVALO_MINIMO,
     INTERVALO_SINCRONIZACION,
@@ -138,14 +139,47 @@ def main() -> None:
             f"intervalo configurado en config_sync.py ({INTERVALO_SINCRONIZACION} s)."
         ),
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Consultar aunque Loteka esté cerrado (fuera del horario de "
+            "publicación 07:00-22:00, hora de República Dominicana)."
+        ),
+    )
     args = parser.parse_args()
 
     if args.watch is None:
+        if not args.force and not horario_loteka.abierto():
+            local = horario_loteka.ahora()
+            estado = horario_loteka.estado()
+            print(
+                f"Loteka está cerrado ({local.strftime('%H:%M')} DR). "
+                f"No se consulta: la publicación va de las {estado['apertura']} a las "
+                f"{estado['cierre']} y abre de nuevo en "
+                f"{horario_loteka.proxima_apertura().strftime('%H:%M')} DR. "
+                "Usa --force para consultar de todas formas."
+            )
+            return
         run_once(CSV_PATH)
         return
     intervalo_valido(args.watch)
 
     while True:
+        if not args.force and not horario_loteka.abierto():
+            local = horario_loteka.ahora()
+            print(
+                f"Loteka cerrado ({local.strftime('%H:%M')} DR). "
+                f"Se duerme hasta las {horario_loteka.HORA_APERTURA.strftime('%H:%M')} DR.",
+                flush=True,
+            )
+            horario_loteka.esperar_hasta_apertura()
+            print(
+                "Apertura de Loteka: se retoma el scraping con una "
+                "sincronización completa.",
+                flush=True,
+            )
+            continue
         try:
             run_once(CSV_PATH)
         except Exception as error:

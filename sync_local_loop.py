@@ -7,6 +7,10 @@ Responsabilidades:
 3. Empujar los resultados al servicio de Render, si está configurado.
 4. Aplicar una pausa larga cuando Loteka rechaza repetidamente las
    peticiones, para no insistir y no quemar la IP residencial.
+5. Respetar el **horario de publicación de Loteka**: se consulta sólo entre
+   las 07:00 y las 22:00 (hora de República Dominicana). Fuera de esa ventana
+   el bucle duerme hasta la apertura y, al reabrir, arranca con todo
+   (sincronización y envío completos).
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import horario_loteka
 from config_render import TOKEN_RENDER, URL_RENDER
 from config_sync import INTERVALO_SINCRONIZACION, descripcion
 from push_render import sincronizar
@@ -42,7 +47,7 @@ CICLOS_ENVIO_COMPLETO = 20
 def run_sync() -> bool:
     try:
         result = subprocess.run(
-            [sys.executable, str(SCRIPT)],
+            [sys.executable, str(SCRIPT), "--force"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -125,7 +130,27 @@ def main() -> None:
 
     fallos = 0
     ciclo = 0
+    # Al reabrir tras la pausa nocturna se arranca con todo: sincronización
+    # y envío completo del histórico.
+    arranque_completo = False
     while True:
+        # Horario de publicación: fuera de la ventana no se consulta.
+        if not horario_loteka.abierto():
+            local = horario_loteka.ahora()
+            print(
+                f"Loteka cerrado ({local.strftime('%H:%M')} DR). "
+                f"Se duerme hasta las {horario_loteka.HORA_APERTURA.strftime('%H:%M')} DR.",
+                flush=True,
+            )
+            horario_loteka.esperar_hasta_apertura()
+            arranque_completo = True
+            print(
+                "Apertura de Loteka: se retoma el scraping con sincronización "
+                "y envío completos.",
+                flush=True,
+            )
+            continue
+
         marca = CSV_PATH.stat().st_mtime if CSV_PATH.exists() else 0.0
         ok = run_sync()
         if ok:
@@ -133,8 +158,10 @@ def main() -> None:
             commit_if_changed()
             nuevo = CSV_PATH.exists() and CSV_PATH.stat().st_mtime != marca
             ciclo += 1
-            if nuevo or ciclo % CICLOS_ENVIO_COMPLETO == 0:
-                enviar_a_render(forzar_completo=(ciclo % CICLOS_ENVIO_COMPLETO == 0))
+            completo = arranque_completo or ciclo % CICLOS_ENVIO_COMPLETO == 0
+            arranque_completo = False
+            if nuevo or completo:
+                enviar_a_render(forzar_completo=completo)
             else:
                 print("Sin sorteos nuevos; no se envía nada a Render.")
         else:
