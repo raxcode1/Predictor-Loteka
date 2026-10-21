@@ -75,14 +75,22 @@ def read_csv_bytes(data: bytes) -> list[dict[str, str]]:
 
 
 def read_rows() -> list[dict[str, str]]:
-    if not BLOB_TOKEN:
-        return read_csv_bytes(LOCAL_CSV.read_bytes())
     try:
-        return read_csv_bytes(blob_request("GET", BLOB_PATH))
-    except HTTPError as error:
-        if error.code != 404:
-            raise
-        return read_csv_bytes(LOCAL_CSV.read_bytes())
+        if not BLOB_TOKEN:
+            return read_csv_bytes(LOCAL_CSV.read_bytes())
+        try:
+            return read_csv_bytes(blob_request("GET", BLOB_PATH))
+        except HTTPError as error:
+            if error.code != 404:
+                return []
+            return read_csv_bytes(LOCAL_CSV.read_bytes())
+    except Exception:
+        try:
+            if LOCAL_CSV.exists():
+                return read_csv_bytes(LOCAL_CSV.read_bytes())
+        except Exception:
+            pass
+        return []
 
 
 def serialize_rows(rows: list[dict[str, str]]) -> bytes:
