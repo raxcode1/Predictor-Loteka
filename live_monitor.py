@@ -353,7 +353,7 @@ class LiveMonitor:
             {"number": int(n), "probability": float(forecast.probabilities.get(n, 0.0))}
             for n, _ in heuristic_list[:5]
         ]
-        return {
+        record = {
             "source_draw": label,
             "source_number": number,
             "created_at": _now(),
@@ -366,6 +366,26 @@ class LiveMonitor:
             "heuristic": heuristic_list,
             "markov_forecast": markov_forecast,
             "heuristic_forecast": heuristic_forecast,
+            "m1": markov_forecast[0]["number"] if len(markov_forecast)>0 else None,
+            "p1": markov_forecast[0]["probability"] if len(markov_forecast)>0 else None,
+            "m2": markov_forecast[1]["number"] if len(markov_forecast)>1 else None,
+            "p2": markov_forecast[1]["probability"] if len(markov_forecast)>1 else None,
+            "m3": markov_forecast[2]["number"] if len(markov_forecast)>2 else None,
+            "p3": markov_forecast[2]["probability"] if len(markov_forecast)>2 else None,
+            "m4": markov_forecast[3]["number"] if len(markov_forecast)>3 else None,
+            "p4": markov_forecast[3]["probability"] if len(markov_forecast)>3 else None,
+            "m5": markov_forecast[4]["number"] if len(markov_forecast)>4 else None,
+            "p5": markov_forecast[4]["probability"] if len(markov_forecast)>4 else None,
+            "h1": heuristic_forecast[0]["number"] if len(heuristic_forecast)>0 else None,
+            "ph1": heuristic_forecast[0]["probability"] if len(heuristic_forecast)>0 else None,
+            "h2": heuristic_forecast[1]["number"] if len(heuristic_forecast)>1 else None,
+            "ph2": heuristic_forecast[1]["probability"] if len(heuristic_forecast)>1 else None,
+            "h3": heuristic_forecast[2]["number"] if len(heuristic_forecast)>2 else None,
+            "ph3": heuristic_forecast[2]["probability"] if len(heuristic_forecast)>2 else None,
+            "h4": heuristic_forecast[3]["number"] if len(heuristic_forecast)>3 else None,
+            "ph4": heuristic_forecast[3]["probability"] if len(heuristic_forecast)>3 else None,
+            "h5": heuristic_forecast[4]["number"] if len(heuristic_forecast)>4 else None,
+            "ph5": heuristic_forecast[4]["probability"] if len(heuristic_forecast)>4 else None,
             "decision": {},
             "status": STATUS_PENDIENTE,
             "observed_draw": None,
@@ -375,6 +395,7 @@ class LiveMonitor:
             "matched": "pendiente",
             "alert_hit": None,
         }
+        return record
 
     def _close(
         self,
