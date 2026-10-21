@@ -243,8 +243,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps(dashboard(), ensure_ascii=False).encode("utf-8")
             self.send_response(200)
         except Exception as exception:
-            body = json.dumps({"error": str(exception)}).encode("utf-8")
-            self.send_response(500)
+            body = json.dumps({"results": [], "error": str(exception), "sync_error": str(exception)}, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
