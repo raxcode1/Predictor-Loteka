@@ -13,8 +13,11 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+import config_alertas
 import state_recovery
 from config_sync import INTERVALO_SINCRONIZACION, descripcion
+from live_monitor import LiveMonitor, json_file_store
+from m4_engine.kelly import KellyConfig
 from sync_ruleta_express import CSV_PATH, run_once
 
 
@@ -22,6 +25,7 @@ HOST = "127.0.0.1"
 SYNC_INTERVAL = INTERVALO_SINCRONIZACION
 TIME_ZONE = ZoneInfo("America/Santo_Domingo")
 WEB_PATH = Path(__file__).with_name("web")
+REGISTRO_PATH = Path(__file__).with_name(config_alertas.ARCHIVO_REGISTRO)
 
 
 class DashboardState:
@@ -32,6 +36,21 @@ class DashboardState:
         self.sync_error: str | None = None
         self.recovery: dict | None = None
         self.recovery_error: str | None = None
+        self.monitor_error: str | None = None
+        self.monitor = LiveMonitor(
+            *json_file_store(REGISTRO_PATH),
+            spec=config_alertas.spec(),
+            payout=config_alertas.modelo_pago(),
+            kelly_config=KellyConfig(
+                fraction=config_alertas.FRACCION_KELLY,
+                max_fraction=config_alertas.TOPE_EXPOSICION,
+                min_observations=config_alertas.OBSERVACIONES_MINIMAS,
+                min_hits=config_alertas.ACIERTO_MINIMO,
+            ),
+            bankroll=config_alertas.BANCO_INICIAL,
+            backfill_rounds=config_alertas.RONDAS_BACKFILL,
+            max_records=config_alertas.RONDAS_GUARDADAS,
+        )
 
     def update_recovery(self) -> None:
         recovery = state_recovery.build_state_recovery(CSV_PATH)
@@ -39,9 +58,15 @@ class DashboardState:
             self.recovery = recovery
             self.recovery_error = None
 
+    def update_monitor(self) -> None:
+        """Actualiza el registro vivo de predicciones y la alerta M4."""
+        with self.lock:
+            self.monitor.update(read_results())
+            self.monitor_error = None
+
     def snapshot(self) -> dict:
         with self.lock:
-            return {
+            payload = {
                 "results": read_results(),
                 "last_sync": self.last_sync,
                 "sync_error": self.sync_error,
@@ -49,6 +74,8 @@ class DashboardState:
                 "recovery_error": self.recovery_error,
                 "refresh_interval_seconds": SYNC_INTERVAL,
             }
+            payload.update(self.monitor.payload())
+            return payload
 
 
 def read_results() -> list[dict[str, str]]:
@@ -72,9 +99,9 @@ def sync_loop(state: DashboardState) -> None:
         try:
             with state.lock:
                 previous_draw = state.last_draw
+            run_once(CSV_PATH)
+            current_draw = latest_draw()
             with state.lock:
-                run_once(CSV_PATH)
-                current_draw = latest_draw()
                 state.last_sync = datetime.now(TIME_ZONE).isoformat(timespec="seconds")
                 state.sync_error = None
                 state.last_draw = current_draw
@@ -84,6 +111,11 @@ def sync_loop(state: DashboardState) -> None:
                 except Exception as error:
                     with state.lock:
                         state.recovery_error = str(error)
+                try:
+                    state.update_monitor()
+                except Exception as error:
+                    with state.lock:
+                        state.monitor_error = str(error)
         except Exception as error:
             with state.lock:
                 state.sync_error = str(error)
@@ -149,6 +181,10 @@ def main() -> None:
         state.update_recovery()
     except Exception as error:
         state.recovery_error = str(error)
+    try:
+        state.update_monitor()
+    except Exception as error:
+        state.monitor_error = str(error)
 
     RequestHandler.state = state
     ThreadingHTTPServer.allow_reuse_address = True
@@ -157,6 +193,12 @@ def main() -> None:
     print(
         f"Dashboard disponible en http://{args.host}:{args.port} "
         f"(sincronización {descripcion()})",
+        flush=True,
+    )
+    print(
+        f"Registro vivo: {REGISTRO_PATH} · stake sobre "
+        f"{config_alertas.BANCO_INICIAL:.0f} unidades con el modelo de pago "
+        f"{config_alertas.MODELO_PAGO}",
         flush=True,
     )
     try:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .alerts import AlertEngine
@@ -71,6 +72,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        # La consola de Windows usa cp1252: se fuerza UTF-8 y, si algún carácter
+        # no es representable, se sustituye en lugar de abortar la ejecución.
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     args = build_parser().parse_args(argv)
 
     spec = StrategySpec(
@@ -90,10 +96,6 @@ def main(argv: list[str] | None = None) -> int:
     engine = AlertEngine(spec=spec, payout=payout, kelly_config=kelly_config, bankroll=args.bankroll)
     clean = collapse_conflicts(build_features(frame, spec))
     engine.backfill(clean)
-
-    from .report import render_report
-
-    from .report import render_report
 
     rendered = render_report(report, engine, args.csv)
     if not args.quiet:

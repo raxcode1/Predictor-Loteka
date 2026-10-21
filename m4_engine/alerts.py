@@ -79,6 +79,24 @@ class OnlineHitRate:
         self._hits += int(hit)
         self._trials += 1
 
+    def seed(self, hits: int, trials: int) -> None:
+        """Fija el estado acumulado del estimador.
+
+        Se usa para rehidratar el motor desde un registro persistido: el
+        monitor en vivo guarda los contadores de aciertos y fallos y los
+        restaura al arrancar, de modo que el stake dimensionado por Kelly no
+        dependa de que el proceso lleve tiempo en memoria.
+        """
+        if hits < 0 or trials < 0:
+            raise ValueError("hits y trials no pueden ser negativos.")
+        if hits > trials:
+            raise ValueError("hits no puede superar a trials.")
+        self._hits = int(hits)
+        self._trials = int(trials)
+        self._weight = 1.0
+        self._weighted_hits = float(hits)
+        self._weighted_trials = float(trials)
+
     @property
     def hits(self) -> int:
         return self._hits
@@ -289,6 +307,23 @@ class AlertEngine:
         self.window_estimator = OnlineHitRate(self.half_life)
         self.alert_estimator = OnlineHitRate(self.half_life)
         self.anchor_estimator = OnlineHitRate(self.half_life)
+        self.history.clear()
+
+    def seed_cohorts(
+        self,
+        window: tuple[int, int] = (0, 0),
+        alert: tuple[int, int] = (0, 0),
+        anchor: tuple[int, int] = (0, 0),
+    ) -> None:
+        """Restaura las tres cohortes desde contadores acumulados.
+
+        `window` es la cohorte de rondas con P(M4) dentro de la ventana
+        operativa, `alert` la de alertas emitidas y `anchor` la de alertas
+        con anclaje. Cada par es ``(aciertos, rondas)``.
+        """
+        self.window_estimator.seed(*window)
+        self.alert_estimator.seed(*alert)
+        self.anchor_estimator.seed(*anchor)
         self.history.clear()
 
     def _empty_decision(

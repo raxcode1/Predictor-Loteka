@@ -33,6 +33,8 @@ from m4_engine.stats import (
     wilson_interval,
 )
 from m4_engine.validation import validate_strategy
+from live_models import LiveModelEngine
+from live_monitor import LiveMonitor, memory_store
 
 CSV_PATH = (
     Path(__file__).resolve().parent
@@ -316,6 +318,130 @@ def main() -> int:
     check("número normalizado", normalized["numbers"]["M4"] == 12)
     check("probabilidad normalizada", abs(normalized["probabilities"]["M4"] - 0.063) < 1e-9)
     check("último número normalizado", normalized["last_number"] == 7)
+
+    section("10. Monitor en vivo")
+    values = [(index * 7 + 3) % 19 for index in range(40)]
+    rows = [
+        {
+            "Fecha": "01/01/2026",
+            "Hora": "12:00 PM",
+            "No_Sorteo": f"No. {1001 + index}",
+            "Numero": f"{value:02d}",
+        }
+        for index, value in enumerate(values)
+    ]
+
+    loader, saver = memory_store()
+    monitor = LiveMonitor(
+        loader,
+        saver,
+        spec=StrategySpec(),
+        payout=EXPRESS_19,
+        kelly_config=KellyConfig(),
+        bankroll=1000.0,
+        backfill_rounds=40,
+        max_records=100,
+    )
+    live_payload = monitor.update(rows)
+    live_predictions = live_payload["predictions"]
+    resolved = [
+        item for item in live_predictions if item["status"] in ("acierto", "fallo")
+    ]
+    pending = [item for item in live_predictions if item["status"] == "pendiente"]
+    check("el monitor guarda las rondas evaluadas", len(live_predictions) >= 30, f"n={len(live_predictions)}")
+    check("cada ronda evaluada tiene resultado", all(item["actual_number"] is not None for item in resolved))
+    check("queda una sola ronda pendiente", len(pending) == 1, f"n={len(pending)}")
+    check(
+        "las rondas evaluadas coinciden con el contador",
+        live_payload["alert_stats"]["rounds"] == len(resolved),
+        f"{live_payload['alert_stats']['rounds']} vs {len(resolved)}",
+    )
+    check(
+        "las alertas emitidas coinciden con el contador",
+        live_payload["alert_stats"]["alerts"]
+        == sum(1 for item in live_predictions if item["alert_fired"]),
+    )
+    check("la alerta expone la ronda en curso", live_payload["alert"]["available"] is True)
+    check(
+        "sin evidencia suficiente el stake es cero",
+        live_payload["alert"]["stake_applied"] is False
+        and live_payload["alert"]["stake_fraction"] == 0.0,
+    )
+
+    reloaded = LiveMonitor(
+        loader,
+        saver,
+        spec=StrategySpec(),
+        payout=EXPRESS_19,
+        kelly_config=KellyConfig(),
+        bankroll=1000.0,
+        backfill_rounds=40,
+        max_records=100,
+    )
+    reloaded_payload = reloaded.update(rows)
+    check(
+        "el registro se conserva al recargar",
+        reloaded_payload["alert_stats"]["rounds"] == live_payload["alert_stats"]["rounds"],
+        f"{reloaded_payload['alert_stats']['rounds']} vs {live_payload['alert_stats']['rounds']}",
+    )
+    check(
+        "no se duplican rondas al recargar",
+        len(reloaded_payload["predictions"]) == len(live_predictions),
+        f"{len(reloaded_payload['predictions'])} vs {len(live_predictions)}",
+    )
+
+    short_engine = LiveModelEngine()
+    for value in values[:20]:
+        short_engine.advance(value)
+    short_forecast = short_engine.forecast()
+    long_engine = LiveModelEngine()
+    captured = None
+    for index, value in enumerate(values):
+        long_engine.advance(value)
+        if index == 19:
+            captured = long_engine.forecast()
+    check("la matriz en vivo tiene diez submodelos", len(short_forecast.numbers) == 10)
+    check(
+        "las probabilidades de la matriz son válidas",
+        all(0.0 < value < 1.0 for value in short_forecast.probabilities.values()),
+    )
+    check(
+        "la predicción no usa el resultado futuro",
+        captured is not None
+        and captured.numbers == short_forecast.numbers
+        and captured.probabilities == short_forecast.probabilities,
+    )
+
+    legacy_loader, legacy_saver = memory_store()
+    legacy_saver(
+        {
+            "predictions": [
+                {
+                    "source_draw": "No. 1001",
+                    "status": "acierto",
+                    "markov": [],
+                    "heuristic": [],
+                }
+            ],
+            "pauses": [],
+        }
+    )
+    legacy_monitor = LiveMonitor(
+        legacy_loader,
+        legacy_saver,
+        spec=StrategySpec(),
+        payout=EXPRESS_19,
+        kelly_config=KellyConfig(),
+        bankroll=1000.0,
+        backfill_rounds=40,
+        max_records=100,
+    )
+    legacy_payload = legacy_monitor.update(rows)
+    check(
+        "el registro heredado se descarta y se recalcula",
+        legacy_payload["alert_stats"]["rounds"] > 0
+        and all(item.get("alert_fired") is not None for item in legacy_payload["predictions"]),
+    )
 
     print()
     print(f"Comprobaciones superadas: {PASSED}")

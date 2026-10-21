@@ -11,12 +11,15 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import config_alertas
 import state_recovery
 try:
     from auth_utils import authorized
 except ImportError:
     from api.auth_utils import authorized
 from config_sync import INTERVALO_SINCRONIZACION
+from live_monitor import LiveMonitor, memory_store
+from m4_engine.kelly import KellyConfig
 from sync_ruleta_express import extract_results, fetch_page
 
 
@@ -30,8 +33,7 @@ EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 
 _cached_draw: str | None = None
 _cached_recovery: dict | None = None
-_local_predictions: list[dict] = []
-_local_prediction_store: dict = {"predictions": [], "pauses": []}
+_monitor: LiveMonitor | None = None
 
 
 def blob_request(
@@ -83,36 +85,24 @@ def serialize_rows(rows: list[dict[str, str]]) -> bytes:
     return output.getvalue().encode("utf-8-sig")
 
 
-def read_prediction_store() -> dict:
-    global _local_prediction_store
+def prediction_store():
+    """Almacén del registro vivo: Vercel Blob si hay token, memoria si no."""
     if not BLOB_TOKEN:
-        return {
-            "predictions": list(_local_prediction_store["predictions"]),
-            "pauses": list(_local_prediction_store["pauses"]),
-        }
-    try:
-        stored = json.loads(blob_request("GET", PREDICTIONS_PATH).decode("utf-8"))
+        return memory_store()
+
+    def load() -> dict:
+        try:
+            stored = json.loads(blob_request("GET", PREDICTIONS_PATH).decode("utf-8"))
+        except HTTPError as error:
+            if error.code != 404:
+                raise
+            return {}
         if isinstance(stored, list):
             return {"predictions": stored, "pauses": []}
-        return {
-            "predictions": stored.get("predictions", []),
-            "pauses": stored.get("pauses", []),
-        }
-    except HTTPError as error:
-        if error.code != 404:
-            raise
-        return {"predictions": [], "pauses": []}
+        return stored if isinstance(stored, dict) else {}
 
-
-def save_prediction_store(store: dict) -> None:
-    global _local_prediction_store, _local_predictions
-    _local_prediction_store = {
-        "predictions": list(store["predictions"]),
-        "pauses": list(store["pauses"]),
-    }
-    _local_predictions = list(store["predictions"])
-    payload = json.dumps(_local_prediction_store, ensure_ascii=False, indent=2).encode("utf-8")
-    if BLOB_TOKEN:
+    def save(data: dict) -> None:
+        payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
         blob_request(
             "PUT",
             PREDICTIONS_PATH,
@@ -120,131 +110,28 @@ def save_prediction_store(store: dict) -> None:
             "application/json; charset=utf-8",
         )
 
-
-def read_predictions() -> list[dict]:
-    return read_prediction_store()["predictions"]
+    return load, save
 
 
-def draw_number(draw: str) -> int:
-    return int(draw.rsplit(" ", 1)[-1])
-
-
-def update_predictions(
-    predictions: list[dict],
-    rows: list[dict[str, str]],
-    recovery: dict,
-) -> tuple[list[dict], list[dict]]:
-    store = read_prediction_store()
-    pauses = store["pauses"]
-    draws = sorted(
-        (row for row in rows if row.get("No_Sorteo")),
-        key=lambda row: draw_number(row["No_Sorteo"]),
-    )
-    by_source = {item["source_draw"] for item in predictions}
-    changed = False
-
-    for prediction in predictions:
-        if prediction.get("status") != "pendiente":
-            continue
-        source_number = draw_number(prediction["source_draw"])
-        next_draw = next(
-            (row for row in draws if draw_number(row["No_Sorteo"]) > source_number),
-            None,
-        )
-        if next_draw is None:
-            continue
-        source_number = draw_number(prediction["source_draw"])
-        next_number = draw_number(next_draw["No_Sorteo"])
-        if next_number > source_number + 1:
-            prediction.update(
-                {
-                    "status": "omitida_pausa",
-                    "observed_draw": next_draw["No_Sorteo"],
-                    "actual_number": None,
-                    "matched": "no evaluada",
-                }
-            )
-            changed = True
-            continue
-        actual = int(next_draw["Numero"])
-        markov_rank = next(
-            (
-                index + 1
-                for index, item in enumerate(prediction["markov"])
-                if item["number"] == actual
+def live_monitor() -> LiveMonitor:
+    """Monitor vivo compartido por las invocaciones de la función."""
+    global _monitor
+    if _monitor is None:
+        _monitor = LiveMonitor(
+            *prediction_store(),
+            spec=config_alertas.spec(),
+            payout=config_alertas.modelo_pago(),
+            kelly_config=KellyConfig(
+                fraction=config_alertas.FRACCION_KELLY,
+                max_fraction=config_alertas.TOPE_EXPOSICION,
+                min_observations=config_alertas.OBSERVACIONES_MINIMAS,
+                min_hits=config_alertas.ACIERTO_MINIMO,
             ),
-            None,
+            bankroll=config_alertas.BANCO_INICIAL,
+            backfill_rounds=config_alertas.RONDAS_BACKFILL,
+            max_records=config_alertas.RONDAS_GUARDADAS,
         )
-        heuristic_rank = next(
-            (
-                index + 1
-                for index, item in enumerate(prediction["heuristic"])
-                if item["number"] == actual
-            ),
-            None,
-        )
-        prediction.update(
-            {
-                "status": "acierto" if markov_rank or heuristic_rank else "fallo",
-                "observed_draw": next_draw["No_Sorteo"],
-                "actual_number": actual,
-                "markov_rank": markov_rank,
-                "heuristic_rank": heuristic_rank,
-                "matched": (
-                    "ambos"
-                    if markov_rank and heuristic_rank
-                    else "markov"
-                    if markov_rank
-                    else "heuristico"
-                    if heuristic_rank
-                    else "ninguno"
-                ),
-            }
-        )
-        changed = True
-
-    if rows:
-        source_draw = rows[0]["No_Sorteo"]
-        source_number = draw_number(source_draw)
-        previous_draws = [
-            draw_number(item["source_draw"])
-            for item in predictions
-            if item.get("source_draw")
-        ]
-        previous_draw = max(previous_draws, default=None)
-        if previous_draw is not None and source_number > previous_draw + 1:
-            pause = {
-                "from_draw": f"No. {previous_draw + 1}",
-                "to_draw": f"No. {source_number - 1}",
-                "skipped_count": source_number - previous_draw - 1,
-                "detected_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            }
-            if not any(
-                item["from_draw"] == pause["from_draw"]
-                and item["to_draw"] == pause["to_draw"]
-                for item in pauses
-            ):
-                pauses.append(pause)
-                changed = True
-        if source_draw not in by_source:
-            predictions.append(
-                {
-                    "source_draw": source_draw,
-                    "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                    "status": "pendiente",
-                    "markov": recovery["markov_forecast"],
-                    "heuristic": recovery["heuristic_forecast"],
-                }
-            )
-            changed = True
-
-    if changed:
-        save_prediction_store({"predictions": predictions, "pauses": pauses})
-    return sorted(
-        predictions,
-        key=lambda item: draw_number(item["source_draw"]),
-        reverse=True,
-    ), sorted(pauses, key=lambda item: draw_number(item["from_draw"]), reverse=True)
+    return _monitor
 
 
 def merge_results(rows: list[dict[str, str]], new_rows: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -294,20 +181,17 @@ def dashboard() -> dict:
 
     recovery_error: str | None = None
     recovery = None
-    predictions: list[dict] = []
-    predictions_error: str | None = None
     try:
         recovery = recovery_for_rows(rows)
     except Exception as exception:
         recovery_error = str(exception)
-    if recovery is not None:
-        try:
-            predictions, pauses = update_predictions(read_predictions(), rows, recovery)
-        except Exception as exception:
-            predictions_error = str(exception)
-            pauses = []
-    else:
-        pauses = []
+
+    monitor_error: str | None = None
+    monitor_payload: dict = {}
+    try:
+        monitor_payload = live_monitor().update(rows)
+    except Exception as exception:
+        monitor_error = str(exception)
 
     return {
         "results": rows,
@@ -315,9 +199,13 @@ def dashboard() -> dict:
         "sync_error": error,
         "recovery": recovery,
         "recovery_error": recovery_error,
-        "predictions": predictions,
-        "pauses": pauses,
-        "predictions_error": predictions_error,
+        "predictions": monitor_payload.get("predictions", []),
+        "pauses": monitor_payload.get("pauses", []),
+        "predictions_error": monitor_error,
+        "alert": monitor_payload.get("alert"),
+        "alert_stats": monitor_payload.get("alert_stats"),
+        "alert_history": monitor_payload.get("alert_history", []),
+        "prediction_stats": monitor_payload.get("prediction_stats"),
         "refresh_interval_seconds": INTERVALO_SINCRONIZACION,
     }
 

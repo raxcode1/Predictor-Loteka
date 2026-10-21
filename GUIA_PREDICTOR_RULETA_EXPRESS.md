@@ -23,10 +23,17 @@ postprocesamiento, como anti-repetición.
   proyecto en Vercel.
 - `m4_engine/`: motor cuantitativo M4 (alertas de alta ventaja, validación
   empírica y stake dinámico).
+- `live_models.py`: matriz en vivo de diez submodelos (sustituta del ensemble
+  del PDF) calculada de forma incremental sobre el histórico local.
+- `live_monitor.py`: registro vivo de predicciones comparadas, cierre de ciclo
+  y alerta M4 de la ronda en curso.
+- `config_alertas.py`: configuración operativa del monitor y de la alerta.
+- `registro_live.json`: registro vivo local (se genera solo, no se versiona).
 - `ejemplo_alertas_en_vivo.py`: demostración del motor M4 ronda a ronda.
 - `verificar_m4_engine.py`: comprobaciones automáticas del motor M4.
 - `informe_validacion_m4.md` y `informe_validacion_m4.json`: última validación
   sobre el log de supervisión.
+
 
 ## Requisitos
 
@@ -165,16 +172,175 @@ mantengan actualizados. Deténlo con `Ctrl+C`.
 El modo `--watch` solo recopila resultados. No realiza apuestas ni interactúa
 con controles de juego.
 
-## Abrir el sitio web
+## Ejecutar la web en local
+
+Esta es la forma recomendada de ver el dashboard, el registro de predicciones
+comparadas y la alerta M4: todo corre en tu PC, con tu IP residencial y sin
+depender de Vercel.
+
+### 1. Preparar el entorno (una sola vez)
+
+```powershell
+cd "C:\Users\diose\OneDrive\Desktop\Ruleta Express"
+
+# Entorno virtual (recomendado)
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Si prefieres no usar entorno virtual, basta con
+`python -m pip install pandas z3-solver`.
+
+### 2. Arrancar el dashboard
 
 ```powershell
 python .\web_app.py
 ```
 
-Luego abre <http://127.0.0.1:8000>. El sitio muestra el CSV guardado, consulta
-Loteka automáticamente cada `INTERVALO_SINCRONIZACION` segundos (45 por
-defecto) y recalcula el análisis estadístico de `state_recovery` cuando detecta
-un nuevo número de sorteo. El dashboard se detiene con `Ctrl+C`.
+Salida esperada:
+
+```text
+Dashboard disponible en http://127.0.0.1:8000 (sincronización cada 45 s)
+Registro vivo: ...\registro_live.json · stake sobre 1000 unidades con el modelo de pago express19
+```
+
+Abre <http://127.0.0.1:8000> en el navegador. El servidor se detiene con
+`Ctrl+C`.
+
+### 3. Cambiar el puerto o la interfaz
+
+```powershell
+python .\web_app.py --port 8080
+python .\web_app.py --host 0.0.0.0    # accesible desde otros equipos de la red
+```
+
+### Qué hace el dashboard local
+
+1. Levanta un servidor HTTP en `127.0.0.1:8000` y sirve la interfaz de `web/`.
+2. Consulta Loteka cada `INTERVALO_SINCRONIZACION` segundos y guarda los
+   resultados nuevos en `Resultados_RuletaExpress.csv`.
+3. Recalcula el análisis estadístico de `state_recovery` cuando aparece un
+   sorteo nuevo.
+4. Actualiza el registro vivo `registro_live.json`: predicciones comparadas,
+   alerta M4 de la ronda en curso y contadores acumulados.
+5. Expone la API del dashboard en `/api/dashboard` (sin contraseña, por eso
+   escucha sólo en `127.0.0.1`).
+
+El primer arranque retroanaliza las últimas `RONDAS_BACKFILL` rondas del CSV
+para tener historial desde el primer minuto; a partir de ahí el registro se
+recupera del archivo y el arranque es inmediato.
+
+### Consultar la API a mano
+
+```powershell
+# Estado completo
+Invoke-RestMethod http://127.0.0.1:8000/api/dashboard
+
+# Sólo la alerta de la ronda en curso
+(Invoke-RestMethod http://127.0.0.1:8000/api/dashboard).alert
+```
+
+### Problemas frecuentes
+
+| Síntoma | Causa | Solución |
+| --- | --- | --- |
+| `Address already in use` | Ya hay otra instancia en el puerto 8000 | `python .\web_app.py --port 8010` |
+| `ModuleNotFoundError: pandas` | Entorno sin dependencias | `python -m pip install -r requirements.txt` |
+| La alerta muestra «SIN DATOS» | El CSV tiene menos de dos sorteos | Sincroniza antes: `python .\sync_ruleta_express.py` |
+| «Error de sincronización» | Loteka bloqueó la IP | Sube `INTERVALO_SINCRONIZACION` a 60 en `config_sync.py` y reinicia |
+| El panel tarda al arrancar | Retroanálisis inicial de 300 rondas | Ocurre una sola vez; después se lee de `registro_live.json` |
+
+### El registro no se versiona
+
+`registro_live.json` guarda las predicciones comparadas y los contadores. Está
+en `.gitignore` a propósito: es un archivo de trabajo. Si lo borras, el monitor
+vuelve a retroanalizar las últimas rondas del CSV y los contadores acumulados
+se reinician.
+
+## Monitor en vivo: predicciones guardadas y alerta M4
+
+### Qué se guarda
+
+Cada ronda queda registrada con:
+
+- el sorteo base y el número que salió en ese sorteo,
+- la matriz de diez submodelos con su número y su probabilidad,
+- el ranking Markov y el heurístico,
+- la decisión de la alerta M4 (si disparó, con qué número, con qué
+  probabilidad, con qué confianza y con qué stake),
+- el resultado observado, la posición del número en cada ranking y si la
+  señal acertó.
+
+Cuando aparece el siguiente sorteo, la ronda pendiente se resuelve sola. Si se
+saltan sorteos (la web estaba apagada), la ronda se marca como
+`omitida_pausa` y no cuenta ni como acierto ni como fallo.
+
+### La alerta de la ronda en curso
+
+El panel «Alerta M4 · cuándo entrar» muestra:
+
+| Dato | Significado |
+| --- | --- |
+| Estado | `SEÑAL ACTIVA` o `SIN SEÑAL` |
+| Número | El número que propone M4 |
+| P(M4) | Probabilidad que el motor asigna a ese número |
+| Δ | Dispersión entre el submodelo más y el menos probable (límite 4,7%) |
+| Confianza | `ALTO`, o `CRITICO` si el número anterior estaba en {1, 7, 8} |
+| Stake | Fracción del capital y su importe en unidades |
+| Alertas / Aciertos | Señales emitidas, aciertos, tasa y línea base de 5,26% |
+
+Cuando la alerta no dispara, el panel explica el motivo (por ejemplo,
+«P(M4)=7,46% fuera de la ventana operativa (5.0%, 7.0%]»).
+
+Debajo está el historial de las últimas alertas con su resultado, para ver
+cuántas pegan y cuántas no.
+
+### La matriz en vivo es un sustituto
+
+La página pública de Loteka sólo publica el número que salió: los diez
+submodelos del PDF no son públicos. Para que el motor pueda operar en vivo,
+`live_models.py` construye una **matriz sustituta** de diez modelos (cinco
+variantes de Markov y cinco mezclas de transición/frecuencia) calculada con el
+histórico local.
+
+La matriz conserva la estructura que el motor necesita y permite medir la
+lógica de la especificación sobre datos nuevos, pero **no reproduce el
+ensemble del PDF**: por eso el panel la etiqueta como matriz en vivo y las
+tasas que muestra son las de los modelos del proyecto, no las del documento.
+
+### El stake sólo aparece con evidencia
+
+El stake lo dimensiona `KellyStakeSizer` con las cinco cautelas del módulo
+(encogimiento bayesiano, extremo inferior de Wilson, Kelly fraccional,
+ventaja mínima y tope de exposición). Mientras la cohorte de alertas no alcance
+los mínimos de `config_alertas.py` (20 observaciones y 4 aciertos por
+defecto) o el borde inferior del intervalo no supere el equilibrio (5,26%),
+el stake es **0** y el panel explica el motivo. Es la conducta esperada: la
+alerta señala la ronda, el stake sólo se compromete con evidencia.
+
+### Configuración del monitor
+
+Todo lo operativo está en `config_alertas.py`:
+
+| Parámetro | Por defecto | Para qué sirve |
+| --- | --- | --- |
+| `BANCO_INICIAL` | 1000.0 | Capital de referencia para el stake |
+| `MODELO_PAGO` | `express19` | `express19` (0..18, 18:1) o `european37` (37 casillas, 35:1) |
+| `MODO_PRIMARIO` | `any` | `any`, `tie` o `strict` (ver «Motor de alertas M4») |
+| `LIMITE_INFERIOR` / `LIMITE_SUPERIOR` | 0.05 / 0.07 | Ventana operativa de P(M4) |
+| `DISPERSION_MAXIMA` | 0.047 | Dispersión máxima admitida |
+| `NUMEROS_ANCLA` | (1, 7, 8) | Números que activan la confianza «Crítico» |
+| `RONDAS_BACKFILL` | 300 | Rondas retroanalizadas al crear el registro |
+| `RONDAS_GUARDADAS` | 300 | Rondas que se conservan en el registro |
+| `FRACCION_KELLY` / `TOPE_EXPOSICION` | 0.25 / 0.02 | Fracción de Kelly y tope por ronda |
+| `OBSERVACIONES_MINIMAS` / `ACIERTO_MINIMO` | 20 / 4 | Evidencia mínima para arriesgar capital |
+| `ARCHIVO_REGISTRO` | `registro_live.json` | Archivo local del registro |
+
+Después de editarlo, reinicia el proceso (`Ctrl+C` y `python .\web_app.py`).
+Los cambios también afectan a la versión de Vercel, que lee el mismo archivo.
 
 ## Publicar en Vercel
 
@@ -206,6 +372,12 @@ actualizado en Vercel Blob. El análisis `state_recovery` se recalcula cuando
 cambia el sorteo más reciente. El archivo CSV incluido en el repositorio se usa
 como datos iniciales si el Blob todavía no existe.
 
+El registro vivo (predicciones comparadas, alerta M4 y contadores) se guarda
+también en Vercel Blob, en el archivo `ruleta_predictions.json`, con el mismo
+formato que el `registro_live.json` local. Si no hay
+`BLOB_READ_WRITE_TOKEN`, la versión de Vercel funciona con un registro en
+memoria: se reinicia con cada instancia de la función.
+
 ## Ejecutar el predictor
 
 ```powershell
@@ -232,7 +404,9 @@ ranking Markov seleccionado.
 También se conserva un historial de predicciones. Cada predicción queda
 asociada al sorteo que sirvió como base y, cuando aparece el siguiente
 resultado, se indica si el número estaba en el ranking Markov, en el
-heurístico o en ambos, junto con su posición.
+heurístico o en ambos, junto con su posición. Ese historial vive en el
+registro vivo (`registro_live.json` en local, `ruleta_predictions.json` en
+Vercel Blob) y se detalla en el apartado «Monitor en vivo».
 
 Si Vercel estuvo pausado, los sorteos que no pudieron observarse se registran
 como una pausa. Sus predicciones quedan como `omitida_pausa` y no se cuentan
@@ -312,23 +486,30 @@ el siguiente ni para automatizar apuestas.
 
 ## Flujo recomendado
 
-1. Ejecutar el sincronizador:
+1. Ejecutar el dashboard local, que sincroniza, analiza y guarda el registro
+   vivo en un solo proceso:
+
+   ```powershell
+   python .\web_app.py
+   ```
+
+2. Si se prefiere trabajar por consola, ejecutar el sincronizador:
 
    ```powershell
    python .\sync_ruleta_express.py
    ```
 
-2. Ejecutar el predictor:
+3. Ejecutar el predictor:
 
    ```powershell
    python .\state_recovery.py
    ```
 
-3. Guardar los resultados reales posteriores en el CSV mediante el sincronizador.
+4. Guardar los resultados reales posteriores en el CSV mediante el sincronizador.
 
-4. Repetir el backtesting sin cambiar manualmente el modelo por cada resultado.
+5. Repetir el backtesting sin cambiar manualmente el modelo por cada resultado.
 
-5. Considerar que existe una mejora solo si las métricas fuera de muestra
+6. Considerar que existe una mejora solo si las métricas fuera de muestra
    superan de forma estable las líneas base.
 
 ## Motor de alertas M4
@@ -369,10 +550,11 @@ mapa de sensibilidad de umbrales y el control de multiplicidad.
 python .\verificar_m4_engine.py
 ```
 
-Ejecuta 57 comprobaciones sin dependencias externas: carga del CSV,
+Ejecuta 70 comprobaciones sin dependencias externas: carga del CSV,
 reproducción de los números del PDF, integridad del log, estadística (Wilson,
 binomial, Fisher, Holm-Bonferroni), módulo de Kelly, motor de alertas,
-ausencia de look-ahead y coherencia de las métricas del informe.
+ausencia de look-ahead, coherencia de las métricas del informe y monitor en
+vivo (guardado del registro, cierre de ciclo y persistencia).
 
 ### Usar el motor en tiempo real
 
@@ -406,7 +588,9 @@ engine.observe(decision, resultado_real)  # cierra el ciclo tras el sorteo
 estimadores, de modo que el dimensionamiento del stake se basa siempre en
 evidencia ya resuelta.
 
-La demostración completa está en:
+Este ciclo es exactamente el que automatiza el dashboard: `live_monitor.py`
+llama a `evaluate` antes de cada sorteo, guarda la decisión y llama a
+`observe` cuando llega el resultado. La demostración completa está en:
 
 ```powershell
 python .\ejemplo_alertas_en_vivo.py

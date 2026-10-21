@@ -1,5 +1,7 @@
 const number = (value) => String(value).padStart(2, "0");
 const percent = (value) => `${(value * 100).toFixed(2)}%`;
+const units = (value) => `${Number(value).toFixed(2)} u`;
+const isBlank = (value) => value === null || value === undefined;
 
 // El intervalo real llega en la respuesta de la API (config_sync.py).
 // Este valor sólo se usa hasta la primera respuesta.
@@ -18,38 +20,125 @@ function render(data) {
   const intervalSeconds = Math.round(refreshIntervalMs / 1000);
   document.querySelector("#sync-status").textContent = data.sync_error
     ? `Error: ${data.sync_error}`
-    : "Sincronización activa · cada ${intervalSeconds} s";
+    : `Sincronización activa · cada ${intervalSeconds} s`;
 
   document.querySelector("#latest-result").textContent = latest ? number(latest.Numero) : "-";
   document.querySelector("#latest-meta").textContent = latest
     ? `${latest.No_Sorteo} · ${latest.Fecha} ${latest.Hora}`
     : "No hay resultados guardados.";
 
-  const recovery = data.recovery;
-  const recoveryError = document.querySelector("#recovery-error");
-  recoveryError.textContent = data.recovery_error || "";
-  recoveryError.classList.toggle("hidden", !data.recovery_error);
-  if (recovery) {
-    const model = recovery.selected_model;
-    document.querySelector("#sample-size").textContent = `${recovery.sample_size} observaciones`;
-    document.querySelector("#top1").textContent = percent(model.top1);
-    document.querySelector("#top3").textContent = percent(model.top3);
-    document.querySelector("#log-loss").textContent = model.log_loss.toFixed(4);
-    document.querySelector("#markov-forecast").innerHTML = recovery.markov_forecast
-      .map((item, index) => `<li><span>${index + 1}. ${number(item.number)}</span><strong>${percent(item.probability)}</strong></li>`)
-      .join("");
-    document.querySelector("#heuristic-forecast").innerHTML = recovery.heuristic_forecast
-      .map((item, index) => `<li><span>${index + 1}. ${number(item.number)}</span><strong>${percent(item.probability)}</strong></li>`)
-      .join("");
-  }
+  renderRecovery(data.recovery, data.recovery_error);
+  renderResults(results);
+  renderAlert(data);
+  renderPredictions(data);
+  renderPauses(data.pauses);
+}
 
+function renderRecovery(recovery, recoveryError) {
+  const errorBox = document.querySelector("#recovery-error");
+  errorBox.textContent = recoveryError || "";
+  errorBox.classList.toggle("hidden", !recoveryError);
+  if (!recovery) return;
+  const model = recovery.selected_model;
+  document.querySelector("#sample-size").textContent = `${recovery.sample_size} observaciones`;
+  document.querySelector("#top1").textContent = percent(model.top1);
+  document.querySelector("#top3").textContent = percent(model.top3);
+  document.querySelector("#log-loss").textContent = model.log_loss.toFixed(4);
+  document.querySelector("#markov-forecast").innerHTML = recovery.markov_forecast
+    .map((item, index) => `<li><span>${index + 1}. ${number(item.number)}</span><strong>${percent(item.probability)}</strong></li>`)
+    .join("");
+  document.querySelector("#heuristic-forecast").innerHTML = recovery.heuristic_forecast
+    .map((item, index) => `<li><span>${index + 1}. ${number(item.number)}</span><strong>${percent(item.probability)}</strong></li>`)
+    .join("");
+}
+
+function renderResults(results) {
   document.querySelector("#results-body").innerHTML = results
     .map((row) => `<tr><td>${row.Fecha}</td><td>${row.Hora}</td><td>${row.No_Sorteo}</td><td><b>${number(row.Numero)}</b></td></tr>`)
     .join("");
+}
 
-  const predictionsError = document.querySelector("#predictions-error");
-  predictionsError.textContent = data.predictions_error || "";
-  predictionsError.classList.toggle("hidden", !data.predictions_error);
+function renderAlert(data) {
+  const badge = document.querySelector("#alert-state");
+  const errorBox = document.querySelector("#alert-error");
+  const alert = data.alert;
+  errorBox.textContent = data.predictions_error || "";
+  errorBox.classList.toggle("hidden", !data.predictions_error);
+
+  if (!alert || !alert.available) {
+    badge.textContent = "SIN DATOS";
+    badge.className = "alert-badge idle";
+    document.querySelector("#alert-number").textContent = "-";
+    document.querySelector("#alert-detail").textContent = "Sin ronda abierta todavía.";
+    document.querySelector("#alert-failures").innerHTML = "";
+    document.querySelector("#alert-stake").textContent = "-";
+    document.querySelector("#alert-stake-note").textContent = "";
+    document.querySelector("#alert-counters").textContent = "-";
+    document.querySelector("#alert-rate").textContent = "-";
+    document.querySelector("#alert-baseline").textContent = "-";
+    document.querySelector("#alert-history-body").innerHTML = "";
+    return;
+  }
+
+  const stats = data.alert_stats || {};
+  const fired = Boolean(alert.fired);
+  badge.textContent = fired ? "SEÑAL ACTIVA" : "SIN SEÑAL";
+  badge.className = `alert-badge ${fired ? "active" : "idle"}`;
+
+  document.querySelector("#alert-number").textContent = isBlank(alert.number) ? "-" : number(alert.number);
+
+  const details = [];
+  if (!isBlank(alert.probability)) details.push(`P(M4)=${percent(alert.probability)}`);
+  if (!isBlank(alert.spread)) details.push(`Δ=${percent(alert.spread)}`);
+  details.push(`confianza ${alert.confidence}`);
+  details.push(alert.anchor ? "anclaje activo" : "sin anclaje");
+  if (alert.source_draw) details.push(`base ${alert.source_draw}`);
+  document.querySelector("#alert-detail").textContent = details.join(" · ");
+
+  document.querySelector("#alert-failures").innerHTML = (alert.failures || [])
+    .map((item) => `<li>${item}</li>`)
+    .join("");
+
+  const applied = Boolean(alert.stake_applied);
+  const notes = alert.stake_notes || [];
+  document.querySelector("#alert-stake").textContent = applied
+    ? `${percent(alert.stake_fraction)} · ${units(alert.stake_amount)}`
+    : `${units(0)} · sin stake`;
+  document.querySelector("#alert-stake-note").textContent = applied
+    ? `Capital de referencia ${units(alert.bankroll)}${notes.length ? ` · ${notes.join("; ")}` : ""}`
+    : notes.length
+    ? notes.join("; ")
+    : "Sin stake: la evidencia acumulada no respalda la apuesta.";
+
+  document.querySelector("#alert-counters").textContent = `${stats.alerts || 0} de ${stats.rounds || 0} rondas`;
+  document.querySelector("#alert-rate").textContent = stats.alerts
+    ? `${percent(stats.alert_rate)} (${stats.alert_hits}/${stats.alerts})`
+    : "sin alertas";
+  document.querySelector("#alert-baseline").textContent = percent(stats.baseline || 0);
+
+  document.querySelector("#alert-history-body").innerHTML = (data.alert_history || [])
+    .map((item) => {
+      const result = isBlank(item.actual_number) ? "-" : number(item.actual_number);
+      const signal = isBlank(item.hit) ? "-" : item.hit ? "Acierto" : "Fallo";
+      const stake = item.stake_applied ? percent(item.stake_fraction) : "0";
+      return `<tr>
+        <td>${item.source_draw || "-"}</td>
+        <td>${isBlank(item.number) ? "-" : number(item.number)}</td>
+        <td>${result}</td>
+        <td class="${item.hit ? "hit" : "miss"}">${signal}</td>
+        <td>${isBlank(item.probability) ? "-" : percent(item.probability)}</td>
+        <td>${item.confidence || "-"}</td>
+        <td>${stake}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+function renderPredictions(data) {
+  const errorBox = document.querySelector("#predictions-error");
+  errorBox.textContent = data.predictions_error || "";
+  errorBox.classList.toggle("hidden", !data.predictions_error);
+
   document.querySelector("#predictions-body").innerHTML = (data.predictions || [])
     .map((prediction) => {
       const result = prediction.status === "pendiente"
@@ -57,12 +146,8 @@ function render(data) {
         : prediction.status === "omitida_pausa"
         ? "No evaluada · pausa"
         : `${number(prediction.actual_number)} · ${prediction.observed_draw}`;
-      const markov = prediction.markov_rank
-        ? `Sí · #${prediction.markov_rank}`
-        : "No";
-      const heuristic = prediction.heuristic_rank
-        ? `Sí · #${prediction.heuristic_rank}`
-        : "No";
+      const markov = prediction.markov_rank ? `Sí · #${prediction.markov_rank}` : "No";
+      const heuristic = prediction.heuristic_rank ? `Sí · #${prediction.heuristic_rank}` : "No";
       const matched = prediction.status === "pendiente"
         ? "Pendiente"
         : prediction.matched === "ninguno"
@@ -72,14 +157,36 @@ function render(data) {
         : prediction.matched === "markov"
         ? "Markov"
         : "Heurístico";
-      return `<tr><td>${prediction.source_draw}</td><td>${result}</td><td>${markov}</td><td>${heuristic}</td><td>${matched}</td></tr>`;
+      const alert = !prediction.alert_fired
+        ? "—"
+        : isBlank(prediction.alert_hit)
+        ? "Activa"
+        : prediction.alert_hit
+        ? "Acierto"
+        : "Fallo";
+      return `<tr>
+        <td>${prediction.source_draw}</td>
+        <td>${result}</td>
+        <td>${markov}</td>
+        <td>${heuristic}</td>
+        <td>${matched}</td>
+        <td>${alert}</td>
+      </tr>`;
     })
     .join("");
-  const pauses = data.pauses || [];
-  document.querySelector("#pauses-summary").textContent = pauses.length
-    ? `${pauses.length} pausa(s) detectada(s); esos sorteos no cuentan como predicciones evaluadas.`
+
+  const stats = data.prediction_stats || {};
+  document.querySelector("#predictions-summary").textContent = stats.rounds
+    ? `${stats.rounds} rondas evaluadas · Markov top-1 ${percent(stats.markov_top1_rate)} (base ${percent(stats.baseline)}) · Markov top-5 ${percent(stats.markov_rate)} (base ${percent(stats.baseline_top5)}) · Heurístico top-1 ${percent(stats.heuristic_top1_rate)}`
+    : "Aún no hay rondas evaluadas.";
+}
+
+function renderPauses(pauses) {
+  const list = pauses || [];
+  document.querySelector("#pauses-summary").textContent = list.length
+    ? `${list.length} pausa(s) detectada(s); esos sorteos no cuentan como predicciones evaluadas.`
     : "No se han detectado pausas.";
-  document.querySelector("#pauses-body").innerHTML = pauses
+  document.querySelector("#pauses-body").innerHTML = list
     .map((pause) => `<tr><td>${pause.from_draw}</td><td>${pause.to_draw}</td><td>${pause.skipped_count}</td><td>${new Date(pause.detected_at).toLocaleString()}</td></tr>`)
     .join("");
 }

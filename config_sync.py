@@ -14,12 +14,14 @@ bloquear la IP residencial) y 45-60 segundos es un buen equilibrio entre
 detectar rápido el resultado y no cargar el sitio de origen.
 """
 
+
 from __future__ import annotations
+import random
 
 # =============================================================================
 #  CAMBIA AQUÍ los segundos entre consultas. Acepta 15 o más.
 # =============================================================================
-INTERVALO_SINCRONIZACION = 45
+INTERVALO_SINCRONIZACION = random.randint(20, 60)  # segundos entre consultas
 
 #: Límites aceptados para el intervalo, en segundos.
 INTERVALO_MINIMO = 15

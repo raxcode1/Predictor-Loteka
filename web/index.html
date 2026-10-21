@@ -64,20 +64,53 @@
         </table>
       </div>
     </section>
+    <section class="panel alert-panel">
+      <div class="panel-heading">
+        <h2>Alerta M4 · cuándo entrar</h2>
+        <span id="alert-state" class="alert-badge idle">SIN DATOS</span>
+      </div>
+      <div id="alert-error" class="alert hidden"></div>
+      <div class="alert-grid">
+        <div>
+          <div class="alert-number" id="alert-number">-</div>
+          <p class="muted" id="alert-detail">Esperando la primera ronda...</p>
+          <ul class="failures" id="alert-failures"></ul>
+        </div>
+        <div>
+          <h3>Stake (Kelly defensivo)</h3>
+          <div class="stake-value" id="alert-stake">-</div>
+          <p class="muted" id="alert-stake-note">El stake sólo se dimensiona con evidencia acumulada.</p>
+          <h3>Evidence medida</h3>
+          <div class="metrics">
+            <div><span>Alertas</span><strong id="alert-counters">-</strong></div>
+            <div><span>Aciertos</span><strong id="alert-rate">-</strong></div>
+            <div><span>Línea base</span><strong id="alert-baseline">-</strong></div>
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="compact">
+          <thead><tr><th>Sorteo base</th><th>Nº</th><th>Resultado</th><th>Señal</th><th>P(M4)</th><th>Confianza</th><th>Stake</th></tr></thead>
+          <tbody id="alert-history-body"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="panel">
       <div class="panel-heading">
         <h2>Predicciones comparadas</h2>
         <span class="muted">Se evalúan con el siguiente sorteo disponible</span>
       </div>
       <div id="predictions-error" class="alert hidden"></div>
+      <div id="predictions-summary" class="muted"></div>
       <div class="table-wrap">
-        <table>
-          <thead><tr><th>Sorteo base</th><th>Resultado</th><th>Markov</th><th>Heurístico</th><th>Coincidencia</th></tr></thead>
+        <table class="compact">
+          <thead><tr><th>Sorteo base</th><th>Resultado</th><th>Markov</th><th>Heurístico</th><th>Coincidencia</th><th>Alerta M4</th></tr></thead>
           <tbody id="predictions-body"></tbody>
         </table>
       </div>
     </section>
-    <p class="disclaimer">El análisis es estadístico y no garantiza el siguiente resultado.</p>
+    <p class="disclaimer">El análisis es estadístico y no garantiza el siguiente resultado. La alerta M4 opera en modo papel: sólo se dimensiona un stake cuando la evidencia acumulada lo respalda.</p>
   </main>
   <script src="/app.js"></script>
 </body>
