@@ -81,7 +81,7 @@ Ese valor se aplica automáticamente a todos los puntos del proyecto:
 
 | Componente | Efecto |
 | --- | --- |
-| `sync_local_loop.py` | Frecuencia del bucle local que consulta, hace commit y sube a GitHub. |
+| `sync_local_loop.py` | Frecuencia del bucle local que consulta y guarda los resultados en commits locales. |
 | `sync_ruleta_express.py --watch` | Intervalo por defecto del modo continuo. |
 | `web_app.py` | Intervalo del hilo de sincronización del dashboard local. |
 | `api/dashboard.py` + `web/app.js` | Refresco del navegador: el intervalo viaja en la respuesta de la API, así que no hay que tocar el JavaScript. |
@@ -143,9 +143,17 @@ Este script:
 
 1. Ejecuta `sync_ruleta_express.py` cada `INTERVALO_SINCRONIZACION` segundos
    (45 por defecto, se cambia en `config_sync.py`).
-2. Si hay resultados nuevos, hace `commit` y `push` automático a GitHub.
-3. Ese `push` dispara un despliegue automático en Vercel.
-4. La página web muestra los datos actualizados en cuanto termina el despliegue.
+2. Si hay resultados nuevos, los guarda en un **commit local**.
+3. **No sube nada a GitHub**: el `push` es manual, así que el bucle no dispara
+   despliegues en Vercel por su cuenta.
+4. Cuando quieras publicar lo acumulado:
+
+   ```powershell
+   git push
+   ```
+
+5. Ese `push` dispara el despliegue automático en Vercel y la página web
+   muestra los datos actualizados en cuanto termina.
 
 Deja el script ejecutándose en una terminal mientras quieras que los datos se
 mantengan actualizados. Deténlo con `Ctrl+C`.

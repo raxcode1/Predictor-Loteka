@@ -28,7 +28,14 @@ def run_sync() -> bool:
         return False
 
 
-def git_push_if_changed() -> None:
+def commit_if_changed() -> None:
+    """Guarda los resultados nuevos en un commit local.
+
+    No sube nada a GitHub: el `push` es manual, para que el bucle no dispare
+    despliegues en Vercel por su cuenta. Cuando quieras subir lo acumulado:
+
+        git push
+    """
     subprocess.run(["git", "add", "Resultados_RuletaExpress.csv"], check=False)
     diff = subprocess.run(
         ["git", "diff", "--cached", "--quiet"],
@@ -39,8 +46,10 @@ def git_push_if_changed() -> None:
             ["git", "commit", "-m", "Actualizar resultados de Ruleta Express"],
             check=False,
         )
-        subprocess.run(["git", "push"], check=False)
-        print("Cambios subidos a GitHub; Vercel desplegará automáticamente.")
+        print(
+            "Resultados guardados en un commit local; "
+            "súbelos a GitHub con 'git push' cuando quieras."
+        )
     else:
         print("Sin cambios nuevos.")
 
@@ -55,7 +64,7 @@ def main() -> None:
     while True:
         ok = run_sync()
         if ok:
-            git_push_if_changed()
+            commit_if_changed()
         else:
             print("Sincronización falló, reintentando en el siguiente ciclo.")
         time.sleep(INTERVAL)
