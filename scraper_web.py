@@ -69,16 +69,19 @@ class ClienteScraper:
         self._guardar_cache()
 
     def _abrir(self, proxy: str | None):
+        if WORKER_URL:
+            return build_opener()
         handlers = [ProxyHandler({"http": proxy, "https": proxy})] if proxy else []
         return build_opener(*handlers)
 
     def descargar(self, forzar_completo: bool = False) -> tuple[str | None, bool]:
-        headers = {
-            "User-Agent": USER_AGENT,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "es-DO,es;q=0.9,en;q=0.8",
-            "Connection": "keep-alive",
-        }
+        if WORKER_URL:
+            headers = {"User-Agent": USER_AGENT}
+        else:
+            headers = {
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html",
+            }
         if not forzar_completo:
             if self.cache.get("etag"):
                 headers["If-None-Match"] = str(self.cache["etag"])
