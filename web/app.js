@@ -197,6 +197,40 @@ function renderPredictions(data) {
     })
     .join("");
 
+  const det = document.querySelector("#predictions-body-detailed");
+  if (det) {
+    det.innerHTML = (data.predictions || [])
+      .map((prediction) => {
+        const result = prediction.status === "pendiente"
+          ? "Pendiente"
+          : prediction.status === "omitida_pausa"
+          ? "Pausa"
+          : `${number(prediction.actual_number)} · ${prediction.observed_draw}`;
+        const mf = prediction.markov_forecast || [];
+        const hf = prediction.heuristic_forecast || [];
+        const get = (arr, i) => arr[i] || { number: "-", probability: null };
+        const m = [get(mf,0), get(mf,1), get(mf,2), get(mf,3), get(mf,4)];
+        const h = [get(hf,0), get(hf,1), get(hf,2), get(hf,3), get(hf,4)];
+        const p = (x) => (x.probability == null ? "-" : percent(x.probability));
+        const n = (x) => (x.number == null || x.number === "-" ? "-" : number(x.number));
+        return `<tr>
+          <td>${prediction.source_draw}</td>
+          <td>${result}</td>
+          <td>${n(m[0])}</td><td>${p(m[0])}</td>
+          <td>${n(m[1])}</td><td>${p(m[1])}</td>
+          <td>${n(m[2])}</td><td>${p(m[2])}</td>
+          <td>${n(m[3])}</td><td>${p(m[3])}</td>
+          <td>${n(m[4])}</td><td>${p(m[4])}</td>
+          <td>${n(h[0])}</td><td>${p(h[0])}</td>
+          <td>${n(h[1])}</td><td>${p(h[1])}</td>
+          <td>${n(h[2])}</td><td>${p(h[2])}</td>
+          <td>${n(h[3])}</td><td>${p(h[3])}</td>
+          <td>${n(h[4])}</td><td>${p(h[4])}</td>
+        </tr>`;
+      })
+      .join("");
+  }
+
   const stats = data.prediction_stats || {};
   document.querySelector("#predictions-summary").textContent = stats.rounds
     ? `${stats.rounds} rondas evaluadas · Markov top-1 ${percent(stats.markov_top1_rate)} (base ${percent(stats.baseline)}) · Markov top-5 ${percent(stats.markov_rate)} (base ${percent(stats.baseline_top5)}) · Heurístico top-1 ${percent(stats.heuristic_top1_rate)}`
