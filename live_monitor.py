@@ -345,14 +345,18 @@ class LiveMonitor:
     ) -> dict:
         markov_list = list(forecast.markov)
         heuristic_list = list(forecast.heuristic)
-        markov_forecast = [
-            {"number": int(n), "probability": float(forecast.probabilities.get(n, 0.0))}
-            for n, _ in markov_list[:5]
-        ]
-        heuristic_forecast = [
-            {"number": int(n), "probability": float(forecast.probabilities.get(n, 0.0))}
-            for n, _ in heuristic_list[:5]
-        ]
+        markov_forecast = []
+        for n, _ in markov_list[:5]:
+            try:
+                markov_forecast.append({"number": int(n), "probability": float(forecast.probabilities.get(n, 0.0))})
+            except Exception:
+                continue
+        heuristic_forecast = []
+        for n, _ in heuristic_list[:5]:
+            try:
+                heuristic_forecast.append({"number": int(n), "probability": float(forecast.probabilities.get(n, 0.0))})
+            except Exception:
+                continue
         record = {
             "source_draw": label,
             "source_number": number,
