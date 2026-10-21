@@ -199,7 +199,7 @@ function renderPredictions(data) {
 
   const det = document.querySelector("#predictions-body-detailed");
   if (det) {
-    det.innerHTML = (data.predictions || [])
+      det.innerHTML = (data.predictions || [])
       .map((prediction) => {
         const result = prediction.status === "pendiente"
           ? "Pendiente"
@@ -208,11 +208,13 @@ function renderPredictions(data) {
           : `${number(prediction.actual_number)} · ${prediction.observed_draw}`;
         const mf = prediction.markov_forecast || [];
         const hf = prediction.heuristic_forecast || [];
-        const get = (arr, i) => arr[i] || { number: "-", probability: null };
+        const get = (arr, i) => arr[i] || { number: prediction[`m${i+1}`], probability: prediction[`p${i+1}`] };
         const m = [get(mf,0), get(mf,1), get(mf,2), get(mf,3), get(mf,4)];
         const h = [get(hf,0), get(hf,1), get(hf,2), get(hf,3), get(hf,4)];
+        if (m[0].number === undefined && prediction.m1) { m[0]={number:prediction.m1,probability:prediction.p1}; m[1]={number:prediction.m2,probability:prediction.p2}; m[2]={number:prediction.m3,probability:prediction.p3}; m[3]={number:prediction.m4,probability:prediction.p4}; m[4]={number:prediction.m5,probability:prediction.p5}; }
+        if (h[0].number === undefined && prediction.h1) { h[0]={number:prediction.h1,probability:prediction.ph1}; h[1]={number:prediction.h2,probability:prediction.ph2}; h[2]={number:prediction.h3,probability:prediction.ph3}; h[3]={number:prediction.h4,probability:prediction.ph4}; h[4]={number:prediction.h5,probability:prediction.ph5}; }
         const p = (x) => (x.probability == null ? "-" : percent(x.probability));
-        const n = (x) => (x.number == null || x.number === "-" ? "-" : number(x.number));
+        const n = (x) => (x.number == null || x.number === "-" ? "-" : (typeof x.number === 'number' ? number(x.number) : x.number));
         return `<tr>
           <td>${prediction.source_draw}</td>
           <td>${result}</td>
