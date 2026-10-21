@@ -9,3 +9,6 @@ venv/
 # Registro vivo local de predicciones y alertas (se regenera solo).
 registro_live.json
 registro_live.json.tmp
+
+# Estado del envío de datos a Render (se regenera solo).
+estado_push_render.json
