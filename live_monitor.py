@@ -687,7 +687,7 @@ class LiveMonitor:
         return history
 
     def _public_record(self, record: dict) -> dict:
-        """Versión ligera del registro para el navegador."""
+        """VersiÃ³n ligera del registro para el navegador."""
         decision = record.get("decision") or {}
         stake = decision.get("stake") or {}
         return {
@@ -698,11 +698,11 @@ class LiveMonitor:
             "actual_number": record.get("actual_number"),
             "markov_rank": record.get("markov_rank"),
             "heuristic_rank": record.get("heuristic_rank"),
+            "markov_forecast": record.get("markov_forecast") or [],
+            "heuristic_forecast": record.get("heuristic_forecast") or [],
             "matched": record.get("matched"),
             "alert_fired": bool(decision.get("fired")),
+            "alert_hit": record.get("alert_hit"),
             "alert_number": decision.get("number"),
             "alert_probability": decision.get("probability"),
-            "alert_confidence": decision.get("confidence"),
-            "alert_hit": record.get("alert_hit"),
-            "stake_fraction": float(stake.get("stake_fraction", 0.0)),
         }
