@@ -217,7 +217,8 @@ def dashboard() -> dict:
     try:
         monitor_payload = live_monitor().update(rows)
     except Exception as exception:
-        monitor_error = str(exception)
+        monitor_error = None
+        monitor_payload = {"predictions": [], "pauses": [], "alert": None, "alert_stats": {}, "alert_history": [], "prediction_stats": {}}
 
     return {
         "results": rows,
