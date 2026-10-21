@@ -682,7 +682,7 @@ class LiveMonitor:
                     "stake_applied": bool(stake.get("applied")),
                 }
             )
-            if len(history) >= 50:
+            if len(history) >= 100:
                 break
         return history
 
