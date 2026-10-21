@@ -215,10 +215,18 @@ def dashboard() -> dict:
     monitor_error: str | None = None
     monitor_payload: dict = {}
     try:
-        monitor_payload = live_monitor().update(rows)
-    except Exception as exception:
-        monitor_error = None
-        monitor_payload = {"predictions": [], "pauses": [], "alert": None, "alert_stats": {}, "alert_history": [], "prediction_stats": {}}
+        m = live_monitor()
+        monitor_payload = m.update(rows)
+    except Exception:
+        try:
+            # Intentar recrear
+            global _monitor
+            _monitor = None
+            m = live_monitor()
+            monitor_payload = m.update(rows)
+        except Exception as e:
+            monitor_error = str(e)
+            monitor_payload = {}
 
     return {
         "results": rows,
