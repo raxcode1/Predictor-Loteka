@@ -20,10 +20,13 @@ from config_sync import (
 
 import os
 
-URL = os.environ.get("CLOUDFLARE_WORKER_URL", "").strip().rstrip("/") or "https://loteka.com.do"
+WORKER_URL = os.environ.get("CLOUDFLARE_WORKER_URL", "").strip().rstrip("/")
+if WORKER_URL:
+    URL = f"{WORKER_URL}/"
+else:
+    URL = "https://loteka.com.do/"
 if not URL.endswith("/"):
     URL = URL + "/"
-
 TIME_ZONE = ZoneInfo("America/Santo_Domingo")
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 

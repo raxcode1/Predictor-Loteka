@@ -24,11 +24,14 @@ from m4_engine.kelly import KellyConfig
 from sync_ruleta_express import extract_results, fetch_page
 
 
-import os
-
-URL = os.environ.get("CLOUDFLARE_WORKER_URL", "").strip().rstrip("/") or "https://loteka.com.do"
-if not URL.endswith("/"):
-    URL = URL + "/"
+# Configurar URL usando Worker si está disponible
+WORKER_URL = os.environ.get("CLOUDFLARE_WORKER_URL", "").strip().rstrip("/")
+if WORKER_URL:
+    os.environ["SCRAPER_URL"] = f"{WORKER_URL}/"
+    import sync_ruleta_express
+    sync_ruleta_express.URL = f"{WORKER_URL}/"
+    import scraper_web
+    scraper_web.URL = f"{WORKER_URL}/"
 
 BLOB_PATH = "Resultados_RuletaExpress.csv"
 PREDICTIONS_PATH = "ruleta_predictions.json"
