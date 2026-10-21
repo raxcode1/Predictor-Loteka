@@ -1,6 +1,11 @@
 const number = (value) => String(value).padStart(2, "0");
 const percent = (value) => `${(value * 100).toFixed(2)}%`;
 
+// El intervalo real llega en la respuesta de la API (config_sync.py).
+// Este valor sólo se usa hasta la primera respuesta.
+let refreshIntervalMs = 45000;
+let refreshTimer = null;
+
 function render(data) {
   const results = data.results || [];
   const latest = results[0];
@@ -10,9 +15,10 @@ function render(data) {
     : "sin sincronización";
 
   document.querySelector("#sync-dot").classList.toggle("error", Boolean(data.sync_error));
+  const intervalSeconds = Math.round(refreshIntervalMs / 1000);
   document.querySelector("#sync-status").textContent = data.sync_error
     ? `Error: ${data.sync_error}`
-    : "Sincronización activa · cada 15 s";
+    : "Sincronización activa · cada ${intervalSeconds} s";
 
   document.querySelector("#latest-result").textContent = latest ? number(latest.Numero) : "-";
   document.querySelector("#latest-meta").textContent = latest
@@ -82,11 +88,29 @@ async function refresh() {
   try {
     const response = await fetch("/api/dashboard", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    render(await response.json());
+    const data = await response.json();
+    if (data.refresh_interval_seconds) {
+      const configured = Math.max(1, Number(data.refresh_interval_seconds)) * 1000;
+      if (configured !== refreshIntervalMs) {
+        refreshIntervalMs = configured;
+        scheduleRefresh();
+      }
+    }
+    render(data);
   } catch (error) {
     document.querySelector("#sync-dot").classList.add("error");
     document.querySelector("#sync-status").textContent = `Sin conexión: ${error.message}`;
   }
+}
+
+function scheduleRefresh() {
+  if (refreshTimer !== null) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(runRefresh, refreshIntervalMs);
+}
+
+async function runRefresh() {
+  await refresh();
+  scheduleRefresh();
 }
 
 document.querySelector("#logout").addEventListener("click", async () => {
@@ -99,4 +123,4 @@ document.querySelector("#logout").addEventListener("click", async () => {
 });
 
 refresh();
-setInterval(refresh, 15000);
+scheduleRefresh();

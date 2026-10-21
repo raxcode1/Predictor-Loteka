@@ -16,6 +16,7 @@ try:
     from auth_utils import authorized
 except ImportError:
     from api.auth_utils import authorized
+from config_sync import INTERVALO_SINCRONIZACION
 from sync_ruleta_express import extract_results, fetch_page
 
 
@@ -317,6 +318,7 @@ def dashboard() -> dict:
         "predictions": predictions,
         "pauses": pauses,
         "predictions_error": predictions_error,
+        "refresh_interval_seconds": INTERVALO_SINCRONIZACION,
     }
 
 

@@ -10,6 +10,12 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from config_sync import (
+    INTERVALO_MINIMO,
+    INTERVALO_SINCRONIZACION,
+    intervalo_valido,
+)
+
 
 URL = "https://loteka.com.do/"
 CSV_PATH = Path(__file__).with_name("Resultados_RuletaExpress.csv")
@@ -124,16 +130,20 @@ def main() -> None:
     parser.add_argument(
         "--watch",
         type=int,
+        nargs="?",
+        const=INTERVALO_SINCRONIZACION,
         metavar="SEGUNDOS",
-        help="Repetir la consulta con el intervalo indicado.",
+        help=(
+            "Repetir la consulta con el intervalo indicado. Sin valor usa el "
+            f"intervalo configurado en config_sync.py ({INTERVALO_SINCRONIZACION} s)."
+        ),
     )
     args = parser.parse_args()
 
     if args.watch is None:
         run_once(CSV_PATH)
         return
-    if args.watch < 15:
-        raise ValueError("--watch debe ser de al menos 15 segundos.")
+    intervalo_valido(args.watch)
 
     while True:
         try:

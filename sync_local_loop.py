@@ -5,8 +5,10 @@ import sys
 import time
 from pathlib import Path
 
+from config_sync import INTERVALO_SINCRONIZACION, descripcion
+
 SCRIPT = Path(__file__).with_name("sync_ruleta_express.py")
-INTERVAL = 15  # segundos
+INTERVAL = INTERVALO_SINCRONIZACION
 
 
 def run_sync() -> bool:
@@ -44,8 +46,12 @@ def git_push_if_changed() -> None:
 
 
 def main() -> None:
-    print(f"Iniciando bucle de sincronización cada {INTERVAL} segundos...")
-    print("Presiona Ctrl+C para detener.")
+    print(
+        f"Iniciando bucle de sincronización {descripcion()} "
+        f"(configurable en config_sync.py)...",
+        flush=True,
+    )
+    print("Presiona Ctrl+C para detener.", flush=True)
     while True:
         ok = run_sync()
         if ok:

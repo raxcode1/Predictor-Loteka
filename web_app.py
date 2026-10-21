@@ -14,11 +14,12 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 import state_recovery
+from config_sync import INTERVALO_SINCRONIZACION, descripcion
 from sync_ruleta_express import CSV_PATH, run_once
 
 
 HOST = "127.0.0.1"
-SYNC_INTERVAL = 15
+SYNC_INTERVAL = INTERVALO_SINCRONIZACION
 TIME_ZONE = ZoneInfo("America/Santo_Domingo")
 WEB_PATH = Path(__file__).with_name("web")
 
@@ -46,6 +47,7 @@ class DashboardState:
                 "sync_error": self.sync_error,
                 "recovery": self.recovery,
                 "recovery_error": self.recovery_error,
+                "refresh_interval_seconds": SYNC_INTERVAL,
             }
 
 
@@ -154,7 +156,7 @@ def main() -> None:
     threading.Thread(target=sync_loop, args=(state,), daemon=True).start()
     print(
         f"Dashboard disponible en http://{args.host}:{args.port} "
-        f"(sincronización cada {SYNC_INTERVAL} segundos)",
+        f"(sincronización {descripcion()})",
         flush=True,
     )
     try:

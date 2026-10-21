@@ -67,19 +67,41 @@ El script:
 
 Una ejecución repetida no debe crear duplicados.
 
+## Frecuencia de consulta (un solo archivo)
+
+La frecuencia con la que se consultan los números se controla **desde un único
+archivo**: `config_sync.py`.
+
+```python
+# config_sync.py
+INTERVALO_SINCRONIZACION = 45   # <- cambia aquí los segundos entre consultas
+```
+
+Ese valor se aplica automáticamente a todos los puntos del proyecto:
+
+| Componente | Efecto |
+| --- | --- |
+| `sync_local_loop.py` | Frecuencia del bucle local que consulta, hace commit y sube a GitHub. |
+| `sync_ruleta_express.py --watch` | Intervalo por defecto del modo continuo. |
+| `web_app.py` | Intervalo del hilo de sincronización del dashboard local. |
+| `api/dashboard.py` + `web/app.js` | Refresco del navegador: el intervalo viaja en la respuesta de la API, así que no hay que tocar el JavaScript. |
+
+Después de editar el archivo, reinicia el proceso que esté corriendo (el bucle
+o el dashboard). El intervalo mínimo técnico es de 15 segundos; por debajo,
+Loteka puede terminar bloqueando tu IP residencial. Con 45 o 60 segundos el
+resultado se detecta casi igual de rápido y la carga sobre el sitio de origen
+es tres veces menor.
+
 ## Mantener la sincronización activa
 
-Puedes elegir cualquiera de estos intervalos:
+El modo continuo usa por defecto el intervalo de `config_sync.py`:
 
 ```powershell
-# Consultar cada 60 segundos
+# Consulta cada 45 segundos (valor de config_sync.py)
+python .\sync_ruleta_express.py --watch
+
+# O un intervalo explícito para esta ejecución
 python .\sync_ruleta_express.py --watch 60
-
-# Consultar cada 30 segundos
-python .\sync_ruleta_express.py --watch 30
-
-# Consultar cada 15 segundos
-python .\sync_ruleta_express.py --watch 15
 ```
 
 El intervalo mínimo aceptado es de 15 segundos. Un intervalo menor reduce el
@@ -89,7 +111,7 @@ adelanta la publicación de los sorteos.
 El modo `--watch` solo recopila resultados. No realiza apuestas ni interactúa
 con controles de juego.
 
-## Ejecutar sincronización automática cada 15 segundos desde tu PC (recomendado)
+## Ejecutar la sincronización automática desde tu PC (recomendado)
 
 Como Loteka bloquea las peticiones desde los servidores de Vercel, la forma más
 rápida de mantener los datos actualizados es ejecutar el sincronizador desde tu
@@ -119,7 +141,8 @@ python .\sync_local_loop.py
 
 Este script:
 
-1. Ejecuta `sync_ruleta_express.py` cada 15 segundos.
+1. Ejecuta `sync_ruleta_express.py` cada `INTERVALO_SINCRONIZACION` segundos
+   (45 por defecto, se cambia en `config_sync.py`).
 2. Si hay resultados nuevos, hace `commit` y `push` automático a GitHub.
 3. Ese `push` dispara un despliegue automático en Vercel.
 4. La página web muestra los datos actualizados en cuanto termina el despliegue.
@@ -127,9 +150,9 @@ Este script:
 Deja el script ejecutándose en una terminal mientras quieras que los datos se
 mantengan actualizados. Deténlo con `Ctrl+C`.
 
-> **Advertencia:** 15 segundos es muy frecuente. Si Loteka termina bloqueando tu
-> IP residencial, sube el intervalo en `sync_local_loop.py` (cambia
-> `INTERVAL = 15` por `INTERVAL = 60` o más).
+> **Advertencia:** consultar cada 15 segundos es muy frecuente. Si Loteka termina
+> bloqueando tu IP residencial, sube `INTERVALO_SINCRONIZACION` en
+> `config_sync.py` a 60 o más y reinicia el bucle.
 
 El modo `--watch` solo recopila resultados. No realiza apuestas ni interactúa
 con controles de juego.
@@ -141,9 +164,9 @@ python .\web_app.py
 ```
 
 Luego abre <http://127.0.0.1:8000>. El sitio muestra el CSV guardado, consulta
-Loteka automáticamente cada 15 segundos y recalcula el análisis estadístico de
-`state_recovery` cuando detecta un nuevo número de sorteo. El dashboard se
-detiene con `Ctrl+C`.
+Loteka automáticamente cada `INTERVALO_SINCRONIZACION` segundos (45 por
+defecto) y recalcula el análisis estadístico de `state_recovery` cuando detecta
+un nuevo número de sorteo. El dashboard se detiene con `Ctrl+C`.
 
 ## Publicar en Vercel
 
@@ -168,11 +191,12 @@ mantener `web_app.py` ejecutándose como proceso persistente en Vercel.
    npx vercel --prod
    ```
 
-El navegador consulta `/api/dashboard` cada 15 segundos. Cada consulta obtiene
-los resultados públicos, los deduplica y guarda el CSV actualizado en Vercel
-Blob. El análisis `state_recovery` se recalcula cuando cambia el sorteo más
-reciente. El archivo CSV incluido en el repositorio se usa como datos iniciales
-si el Blob todavía no existe.
+El navegador consulta `/api/dashboard` cada `INTERVALO_SINCRONIZACION` segundos
+(45 por defecto; el navegador recibe el valor en la respuesta de la API). Cada
+consulta obtiene los resultados públicos, los deduplica y guarda el CSV
+actualizado en Vercel Blob. El análisis `state_recovery` se recalcula cuando
+cambia el sorteo más reciente. El archivo CSV incluido en el repositorio se usa
+como datos iniciales si el Blob todavía no existe.
 
 ## Ejecutar el predictor
 
