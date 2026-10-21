@@ -83,6 +83,51 @@ adelanta la publicación de los sorteos.
 El modo `--watch` solo recopila resultados. No realiza apuestas ni interactúa
 con controles de juego.
 
+## Ejecutar sincronización automática cada 15 segundos desde tu PC (recomendado)
+
+Como Loteka bloquea las peticiones desde los servidores de Vercel, la forma más
+rápida de mantener los datos actualizados es ejecutar el sincronizador desde tu
+PC (tu IP residencial no está bloqueada).
+
+### 1. Crear el archivo de entorno
+
+Copia `.env.example` a `.env` y rellena los valores:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Edita `.env` con tus credenciales:
+
+- `SESSION_SECRET`: cualquier cadena larga y aleatoria para firmar las sesiones.
+- `ADMIN_USERNAME`: usuario para entrar al dashboard (ej. `admin`).
+- `ADMIN_PASSWORD`: contraseña larga y única.
+- `BLOB_READ_WRITE_TOKEN`: opcional, solo si usas Vercel Blob para guardar los
+  resultados en la nube.
+
+### 2. Ejecutar el bucle de sincronización
+
+```powershell
+python .\sync_local_loop.py
+```
+
+Este script:
+
+1. Ejecuta `sync_ruleta_express.py` cada 15 segundos.
+2. Si hay resultados nuevos, hace `commit` y `push` automático a GitHub.
+3. Ese `push` dispara un despliegue automático en Vercel.
+4. La página web muestra los datos actualizados en cuanto termina el despliegue.
+
+Deja el script ejecutándose en una terminal mientras quieras que los datos se
+mantengan actualizados. Deténlo con `Ctrl+C`.
+
+> **Advertencia:** 15 segundos es muy frecuente. Si Loteka termina bloqueando tu
+> IP residencial, sube el intervalo en `sync_local_loop.py` (cambia
+> `INTERVAL = 15` por `INTERVAL = 60` o más).
+
+El modo `--watch` solo recopila resultados. No realiza apuestas ni interactúa
+con controles de juego.
+
 ## Abrir el sitio web
 
 ```powershell
