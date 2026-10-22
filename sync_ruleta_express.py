@@ -41,6 +41,11 @@ ROW_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+SERVER_DATE_PATTERN = re.compile(
+    r"var\s+fechaServidor\s*=\s*['\"](\d{2}/\d{2}/\d{4})['\"]",
+    re.IGNORECASE,
+)
+
 
 def fetch_page() -> str:
     request = Request(
@@ -66,21 +71,23 @@ def extract_results(html: str) -> list[dict[str, str]]:
 
     section_end = html.find("</ul>", section_start)
     section = html[section_start:section_end if section_end >= 0 else None]
-    today = datetime.now(TIME_ZONE).date()
+    # El home expone la fecha de la jornada publicada; usarla evita filas sin
+    # fecha y es más fiable que inferirla por la hora del sorteo.
+    server_date = SERVER_DATE_PATTERN.search(html)
+    draw_date = (
+        server_date.group(1)
+        if server_date
+        else datetime.now(TIME_ZONE).strftime("%d/%m/%Y")
+    )
     results = []
 
     for match in ROW_PATTERN.finditer(section):
         number = int(match.group("numero"))
         if not 0 <= number <= 18:
             continue
-        draw_time = datetime.strptime(
-            match.group("hora").upper().replace(" ", ""), "%I:%M%p"
-        ).time()
-        # Loteka ofrece el histórico diario por endpoint. Inferir fecha por hora
-        # falla en días previos o cuando el home trae sorteos de varias jornadas.
         results.append(
             {
-                "Fecha": "",
+                "Fecha": draw_date,
                 "Hora": match.group("hora").upper(),
                 "No_Sorteo": f"No. {match.group('sorteo')}",
                 "Numero": f"{number:02d}",
@@ -181,6 +188,83 @@ def backfill_missing_draws(frame: pd.DataFrame, fresh_rows: list[dict[str, str]]
     return list(recovered.values())
 
 
+def complete_missing_dates(
+    frame: pd.DataFrame, fallback_date: date | None = None
+) -> pd.DataFrame:
+    "Completa fechas vacías consultando el histórico diario de Loteka."
+    if frame.empty:
+        return frame
+    dates = frame["Fecha"].fillna("").astype(str).str.strip()
+    missing = dates == ""
+    if not missing.any():
+        return frame
+
+    draw_ids: dict[int, int] = {}
+    for index, row in frame.iterrows():
+        match = re.search(r"(\d+)$", str(row.get("No_Sorteo", "")))
+        if match:
+            draw_ids[index] = int(match.group(1))
+
+    known_dates: dict[int, date] = {}
+    for index, row in frame[~missing].iterrows():
+        match = re.search(r"(\d+)$", str(row.get("No_Sorteo", "")))
+        try:
+            known_dates[int(match.group(1))] = datetime.strptime(
+                str(row["Fecha"]).strip(), "%d/%m/%Y"
+            ).date()
+        except (AttributeError, ValueError):
+            continue
+
+    missing_ids = {
+        draw_ids[index] for index in frame.index[missing] if index in draw_ids
+    }
+    if not missing_ids:
+        return frame
+
+    candidate_days: set[date] = set()
+    if fallback_date:
+        candidate_days.update(
+            {fallback_date, fallback_date - timedelta(days=1)}
+        )
+    ordered = sorted(known_dates)
+    if ordered:
+        low_missing, high_missing = min(missing_ids), max(missing_ids)
+        lower = [draw for draw in ordered if draw < low_missing]
+        upper = [draw for draw in ordered if draw > high_missing]
+        for draw in (max(lower) if lower else None, min(upper) if upper else None):
+            if draw is not None:
+                anchor = known_dates[draw]
+                candidate_days.update(
+                    anchor + timedelta(days=offset) for offset in (-1, 0, 1)
+                )
+        if lower and upper:
+            start = known_dates[max(lower)]
+            end = known_dates[min(upper)]
+            if start <= end and (end - start).days <= 60:
+                candidate_days.update(
+                    start + timedelta(days=i)
+                    for i in range((end - start).days + 1)
+                )
+    if not candidate_days:
+        candidate_days.add(datetime.now(TIME_ZONE).date())
+
+    resolved: dict[int, str] = {}
+    for day in sorted(candidate_days):
+        try:
+            for row in fetch_history_date(day):
+                draw = int(row["No_Sorteo"].split()[-1])
+                if draw in missing_ids:
+                    resolved[draw] = row["Fecha"]
+        except Exception as error:
+            print(f"Aviso: no se pudo completar la fecha de {day:%d/%m/%Y}: {error}")
+
+    for index in frame.index[missing]:
+        draw = draw_ids.get(index)
+        if draw in resolved:
+            frame.at[index, "Fecha"] = resolved[draw]
+    return frame
+
+
 def sync_csv(path: Path, results: list[dict[str, str]]) -> int:
     if path.exists():
         frame = pd.read_csv(path, dtype=str)
@@ -190,6 +274,14 @@ def sync_csv(path: Path, results: list[dict[str, str]]) -> int:
     else:
         frame = pd.DataFrame(columns=EXPECTED_COLUMNS)
 
+    fallback_date = None
+    if results:
+        try:
+            fallback_date = datetime.strptime(results[0]["Fecha"], "%d/%m/%Y").date()
+        except ValueError:
+            pass
+    frame = complete_missing_dates(frame, fallback_date)
+
     fresh_rows = pd.DataFrame(results, columns=EXPECTED_COLUMNS)
     missing_rows = backfill_missing_draws(frame, results)
     if missing_rows:
@@ -197,6 +289,11 @@ def sync_csv(path: Path, results: list[dict[str, str]]) -> int:
     updated = pd.concat([frame, fresh_rows, pd.DataFrame(missing_rows)], ignore_index=True)
     original_draws = set(frame["No_Sorteo"].dropna().astype(str)) if not frame.empty else set()
     updated = updated.drop_duplicates(subset=["No_Sorteo"], keep="last")
+    blank_dates = updated["Fecha"].fillna("").astype(str).str.strip() == ""
+    if blank_dates.any():
+        raise ValueError(
+            f"{int(blank_dates.sum())} sorteos quedaron sin Fecha; no se escribe el CSV."
+        )
     updated["_sorteo_num"] = updated["No_Sorteo"].str.extract(r"(\d+)", expand=False).astype("int64")
     updated = updated.sort_values("_sorteo_num", ascending=False, kind="stable").drop(columns="_sorteo_num")
     updated.to_csv(path, index=False, encoding="utf-8-sig")
