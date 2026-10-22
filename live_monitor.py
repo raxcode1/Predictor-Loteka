@@ -437,32 +437,34 @@ class LiveMonitor:
         number: int,
         forecast: LiveForecast,
     ) -> dict:
-        markov_list = list(forecast.markov or [])
-        heuristic_list = list(forecast.heuristic or [])
         markov_forecast = []
-        for item in markov_list[:5]:
+        for item in list(forecast.markov or [])[:5]:
             if isinstance(item, dict):
                 n = item.get("number")
                 p = item.get("probability")
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                n, p = item[0], item[1]
             else:
-                try:
-                    n = item[0]
-                    p = item[1]
-                except Exception:
-                    continue
-            markov_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
+                continue
+            try:
+                markov_forecast.append({"number": int(n), "probability": float(p)})
+            except Exception:
+                continue
+
         heuristic_forecast = []
-        for item in heuristic_list[:5]:
+        for item in list(forecast.heuristic or [])[:5]:
             if isinstance(item, dict):
                 n = item.get("number")
                 p = item.get("probability")
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                n, p = item[0], item[1]
             else:
-                try:
-                    n = item[0]
-                    p = item[1]
-                except Exception:
-                    continue
-            heuristic_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
+                continue
+            try:
+                heuristic_forecast.append({"number": int(n), "probability": float(p)})
+            except Exception:
+                continue
+
         record = {
             "source_draw": label,
             "source_number": number,
@@ -472,8 +474,8 @@ class LiveMonitor:
                 "numbers": dict(forecast.numbers),
                 "probabilities": dict(forecast.probabilities),
             },
-            "markov": markov_list,
-            "heuristic": heuristic_list,
+            "markov": list(forecast.markov or []),
+            "heuristic": list(forecast.heuristic or []),
             "markov_forecast": markov_forecast,
             "heuristic_forecast": heuristic_forecast,
             "m1": markov_forecast[0]["number"] if len(markov_forecast)>0 else None,
