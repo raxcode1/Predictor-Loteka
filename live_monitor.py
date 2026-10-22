@@ -187,31 +187,67 @@ def _normalize_stats(raw: Any) -> dict[str, int]:
 
 def _rebuild_forecasts_from_lists(record: dict) -> None:
     """Rellena m1-p5/h1-ph5 desde markov/heuristic si faltan."""
-    markov_list = list(record.get("markov") or [])
-    heuristic_list = list(record.get("heuristic") or [])
+    numbers = dict((record.get("matrix") or {}).get("numbers") or {})
     probs = (record.get("matrix") or {}).get("probabilities") or {}
     if not isinstance(probs, dict):
         probs = {}
-    markov_forecast = record.get("markov_forecast") or []
-    if not markov_forecast and markov_list:
+
+    markov_forecast = list(record.get("markov_forecast") or [])
+    if (not markov_forecast or any(m.get("number") is None for m in markov_forecast)):
+        rebuilt = []
+        for name in ["M1", "M2", "M3", "M4", "M5"]:
+            n = numbers.get(name)
+            if n is None:
+                continue
+            p = probs.get(name)
+            try:
+                rebuilt.append({"number": int(n), "probability": float(p) if p is not None else 0.0})
+            except Exception:
+                continue
+        if rebuilt:
+            markov_forecast = rebuilt
+    if not markov_forecast:
+        markov_list = list(record.get("markov") or [])
         rebuilt = []
         for n, _ in markov_list[:5]:
             try:
-                rebuilt.append({"number": int(n), "probability": float(probs.get(n, probs.get(str(n), 0.0)))})
+                p = probs.get(str(n), probs.get(n, 0.0))
+                rebuilt.append({"number": int(n), "probability": float(p)})
             except Exception:
                 continue
         if rebuilt:
-            record["markov_forecast"] = rebuilt
-    heuristic_forecast = record.get("heuristic_forecast") or []
-    if not heuristic_forecast and heuristic_list:
+            markov_forecast = rebuilt
+    if markov_forecast:
+        record["markov_forecast"] = markov_forecast
+
+    heuristic_forecast = list(record.get("heuristic_forecast") or [])
+    if (not heuristic_forecast or any(h.get("number") is None for h in heuristic_forecast)):
+        rebuilt = []
+        for name in ["H1", "H2", "H3", "H4", "H5"]:
+            n = numbers.get(name)
+            if n is None:
+                continue
+            p = probs.get(name)
+            try:
+                rebuilt.append({"number": int(n), "probability": float(p) if p is not None else 0.0})
+            except Exception:
+                continue
+        if rebuilt:
+            heuristic_forecast = rebuilt
+    if not heuristic_forecast:
+        heuristic_list = list(record.get("heuristic") or [])
         rebuilt = []
         for n, _ in heuristic_list[:5]:
             try:
-                rebuilt.append({"number": int(n), "probability": float(probs.get(n, probs.get(str(n), 0.0)))})
+                p = probs.get(str(n), probs.get(n, 0.0))
+                rebuilt.append({"number": int(n), "probability": float(p)})
             except Exception:
                 continue
         if rebuilt:
-            record["heuristic_forecast"] = rebuilt
+            heuristic_forecast = rebuilt
+    if heuristic_forecast:
+        record["heuristic_forecast"] = heuristic_forecast
+
     mf = record.get("markov_forecast") or []
     hf = record.get("heuristic_forecast") or []
     if record.get("m1") is None and len(mf) > 0:
@@ -405,20 +441,55 @@ class LiveMonitor:
         number: int,
         forecast: LiveForecast,
     ) -> dict:
-        markov_list = list(forecast.markov)
-        heuristic_list = list(forecast.heuristic)
+        numbers = dict(getattr(forecast, "numbers", {}) or {})
+        probabilities = dict(getattr(forecast, "probabilities", {}) or {})
+        markov_list = list(forecast.markov or [])
+        heuristic_list = list(forecast.heuristic or [])
+
         markov_forecast = []
-        for n, _ in markov_list[:5]:
+        for name in ["M1", "M2", "M3", "M4", "M5"]:
+            n = numbers.get(name)
+            if n is None:
+                continue
+            p = probabilities.get(name)
+            if p is None:
+                try:
+                    p = float((forecast.probabilities or {}).get(name, 0.0))
+                except Exception:
+                    p = 0.0
             try:
-                markov_forecast.append({"number": int(n), "probability": float(forecast.probabilities.get(n, 0.0))})
+                markov_forecast.append({"number": int(n), "probability": float(p)})
             except Exception:
                 continue
+        if not markov_forecast:
+            for n, _ in markov_list[:5]:
+                try:
+                    markov_forecast.append({"number": int(n), "probability": float(probabilities.get(n, (forecast.probabilities or {}).get(str(n), 0.0)))})
+                except Exception:
+                    continue
+
         heuristic_forecast = []
-        for n, _ in heuristic_list[:5]:
+        for name in ["H1", "H2", "H3", "H4", "H5"]:
+            n = numbers.get(name)
+            if n is None:
+                continue
+            p = probabilities.get(name)
+            if p is None:
+                try:
+                    p = float((forecast.probabilities or {}).get(name, 0.0))
+                except Exception:
+                    p = 0.0
             try:
-                heuristic_forecast.append({"number": int(n), "probability": float(forecast.probabilities.get(n, 0.0))})
+                heuristic_forecast.append({"number": int(n), "probability": float(p)})
             except Exception:
                 continue
+        if not heuristic_forecast:
+            for n, _ in heuristic_list[:5]:
+                try:
+                    heuristic_forecast.append({"number": int(n), "probability": float(probabilities.get(n, (forecast.probabilities or {}).get(str(n), 0.0)))})
+                except Exception:
+                    continue
+
         record = {
             "source_draw": label,
             "source_number": number,
