@@ -38,8 +38,9 @@ from m4_engine.config import PayoutModel, StrategySpec
 from m4_engine.kelly import KellyConfig
 
 from live_models import OUTPUT_MODULUS, LiveForecast, build_forecasts
+from state_recovery import build_recovery_rankings, select_markov_model
 
-STORE_VERSION = 1
+STORE_VERSION = 2
 
 STATUS_PENDIENTE = "pendiente"
 STATUS_ACIERTO = "acierto"
@@ -349,12 +350,16 @@ class LiveMonitor:
         if not self._loaded:
             stored = self.load_store() or {}
             predictions, dropped = _migrate_records(list(stored.get("predictions") or []))
+            try:
+                stored_version = int(stored.get("version", 0))
+            except (TypeError, ValueError):
+                stored_version = 0
             self._state = _State(
                 predictions=predictions,
                 pauses=list(stored.get("pauses") or []),
                 stats=_normalize_stats(stored.get("stats")),
             )
-            self._migrated = dropped > 0
+            self._migrated = dropped > 0 or stored_version < STORE_VERSION
             self._loaded = True
         return self._state
 
@@ -580,6 +585,18 @@ class LiveMonitor:
         if len(draws) >= 2:
             values = [value for _, _, value in draws]
             forecasts = build_forecasts(values, self.backfill_rounds)
+            if forecasts:
+                # La tabla debe comparar el mismo ranking que el panel principal:
+                # modelo Markov seleccionado por holdout + heurístico ponderado.
+                selected_model, _ = select_markov_model(values)
+                rankings = build_recovery_rankings(
+                    values,
+                    self.backfill_rounds,
+                    model=selected_model,
+                )
+                for forecast, ranking in zip(forecasts, rankings):
+                    forecast.markov = ranking["markov"]
+                    forecast.heuristic = ranking["heuristic"]
             if not state.predictions or self._migrated:
                 state.predictions = []
                 state.stats = _empty_stats()

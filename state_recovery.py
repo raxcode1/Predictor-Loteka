@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import argparse
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -44,6 +45,8 @@ LCGS = (
         maximum_shift=47,
     ),
 )
+
+_MODEL_CACHE: dict[tuple[int, int], tuple[dict, list[tuple[int, float]]]] = {}
 
 
 def numeric_outputs(frame: pd.DataFrame) -> pd.Series:
@@ -172,6 +175,146 @@ def rank_next_values(values: list[int], limit: int = 5) -> list[tuple[int, float
     ]
 
 
+def _top_ranked(probabilities: list[float], limit: int = 5) -> list[dict]:
+    ranking = sorted(
+        range(OUTPUT_MODULUS), key=probabilities.__getitem__, reverse=True
+    )
+    return [
+        {"number": number, "probability": float(probabilities[number])}
+        for number in ranking[:limit]
+    ]
+
+
+def build_recovery_rankings(
+    values: list[int],
+    rounds: int,
+    model: dict | None = None,
+    limit: int = 5,
+) -> list[dict]:
+    """Rankings Markov y heurístico de las últimas `rounds` transiciones.
+
+    Usa exactamente el mismo modelo Markov que el panel principal, de modo que
+    "Predicciones comparadas" y el ranking visible sean congruentes. El cálculo
+    es incremental: recorre el histórico una vez en lugar de recalcular 80
+    candidatos por cada ronda.
+    """
+    if rounds <= 0 or len(values) < 2:
+        return []
+    if model is None:
+        model, _ = select_markov_model(values)
+
+    order = max(1, int(model["order"]))
+    alpha = float(model["alpha"])
+    window = model.get("window")
+    frequency_weight = float(model.get("frequency_weight") or 0.0)
+    forbid_repeat = bool(model.get("forbid_repeat"))
+    first_index = max(0, len(values) - 1 - rounds)
+
+    transition = [[0] * OUTPUT_MODULUS for _ in range(OUTPUT_MODULUS)]
+    context_counts: dict[tuple[int, ...], list[int]] = {}
+    frequency = [0] * OUTPUT_MODULUS
+    recent: deque[int] = deque(maxlen=500)
+    rankings: list[dict] = []
+
+    for index, value in enumerate(values):
+        if index > 0:
+            previous = values[index - 1]
+            transition[previous][value] += 1
+            if index >= order:
+                context = tuple(values[index - order:index])
+                counts = context_counts.get(context)
+                if counts is None:
+                    counts = [0] * OUTPUT_MODULUS
+                    context_counts[context] = counts
+                counts[value] += 1
+        frequency[value] += 1
+        recent.append(value)
+        if index < first_index:
+            continue
+
+        last = value
+        if index + 1 <= order:
+            markov = [1.0 / OUTPUT_MODULUS] * OUTPUT_MODULUS
+            frequencies = None
+        elif window is None:
+            if order == 1:
+                markov_counts = transition[last]
+            else:
+                context = tuple(values[index - order + 1:index + 1])
+                markov_counts = context_counts.get(
+                    context, [0] * OUTPUT_MODULUS
+                )
+            total = sum(markov_counts)
+            markov = [
+                (count + alpha) / (total + alpha * OUTPUT_MODULUS)
+                for count in markov_counts
+            ]
+            if forbid_repeat:
+                markov[last] = 0.0
+                total = sum(markov)
+                if total:
+                    markov = [probability / total for probability in markov]
+            if frequency_weight:
+                frequencies = [
+                    (count + alpha) / (index + 1 + alpha * OUTPUT_MODULUS)
+                    for count in frequency
+                ]
+            else:
+                frequencies = None
+        else:
+            markov = markov_probabilities(
+                values[: index + 1], order, alpha, window, forbid_repeat
+            )
+            frequencies = frequency_probabilities(
+                values[: index + 1], alpha, window
+            )
+
+        if frequencies is not None:
+            markov = [
+                (1 - frequency_weight) * markov[candidate]
+                + frequency_weight * frequencies[candidate]
+                for candidate in range(OUTPUT_MODULUS)
+            ]
+            total = sum(markov)
+            if total:
+                markov = [probability / total for probability in markov]
+
+        transition_row = transition[last]
+        transition_total = sum(transition_row)
+        recent_counts: dict[int, int] = {}
+        for number in recent:
+            recent_counts[number] = recent_counts.get(number, 0) + 1
+        recent_len = len(recent)
+        scores = []
+        for candidate in range(OUTPUT_MODULUS):
+            transition_probability = (
+                transition_row[candidate] + 1
+            ) / (transition_total + OUTPUT_MODULUS)
+            recent_probability = (
+                recent_counts.get(candidate, 0) + 1
+            ) / (recent_len + OUTPUT_MODULUS)
+            scores.append(
+                (candidate, 0.75 * transition_probability + 0.25 * recent_probability)
+            )
+        score_total = sum(score for _, score in scores)
+        heuristic = [
+            (candidate, score / score_total if score_total else 1.0 / OUTPUT_MODULUS)
+            for candidate, score in scores
+        ]
+        heuristic.sort(key=lambda item: item[1], reverse=True)
+
+        rankings.append(
+            {
+                "markov": _top_ranked(markov, limit),
+                "heuristic": [
+                    {"number": number, "probability": float(probability)}
+                    for number, probability in heuristic[:limit]
+                ],
+            }
+        )
+    return rankings
+
+
 def markov_probabilities(
     history: list[int],
     order: int,
@@ -288,6 +431,11 @@ def evaluate_markov_model(
 
 
 def select_markov_model(values: list[int]) -> tuple[dict, list[tuple[int, float]]]:
+    cache_key = (len(values), hash(tuple(values)))
+    cached = _MODEL_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     candidates = []
     for order in range(1, 3):
         for alpha in (0.5, 1.0):
@@ -327,6 +475,9 @@ def select_markov_model(values: list[int]) -> tuple[dict, list[tuple[int, float]
         key=lambda item: item[1],
         reverse=True,
     )[:5]
+    if len(_MODEL_CACHE) >= 16:
+        _MODEL_CACHE.pop(next(iter(_MODEL_CACHE)))
+    _MODEL_CACHE[cache_key] = (best, ranked)
     return best, ranked
 
 
