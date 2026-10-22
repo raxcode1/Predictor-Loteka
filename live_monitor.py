@@ -437,33 +437,32 @@ class LiveMonitor:
         number: int,
         forecast: LiveForecast,
     ) -> dict:
-        numbers = dict(getattr(forecast, "numbers", {}) or {})
-        probabilities = dict(getattr(forecast, "probabilities", {}) or {})
         markov_list = list(forecast.markov or [])
         heuristic_list = list(forecast.heuristic or [])
-
         markov_forecast = []
-        for n, _p in markov_list[:5]:
-            try:
-                p = None
-                if isinstance(probabilities, dict):
-                    p = probabilities.get(str(n)) if str(n) in probabilities else probabilities.get(n)
-                if p is None and isinstance(numbers, dict):
-                    pass
-                markov_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
-            except Exception:
-                continue
-
+        for item in markov_list[:5]:
+            if isinstance(item, dict):
+                n = item.get("number")
+                p = item.get("probability")
+            else:
+                try:
+                    n = item[0]
+                    p = item[1]
+                except Exception:
+                    continue
+            markov_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
         heuristic_forecast = []
-        for n, _p in heuristic_list[:5]:
-            try:
-                p = None
-                if isinstance(probabilities, dict):
-                    p = probabilities.get(str(n)) if str(n) in probabilities else probabilities.get(n)
-                heuristic_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
-            except Exception:
-                continue
-
+        for item in heuristic_list[:5]:
+            if isinstance(item, dict):
+                n = item.get("number")
+                p = item.get("probability")
+            else:
+                try:
+                    n = item[0]
+                    p = item[1]
+                except Exception:
+                    continue
+            heuristic_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
         record = {
             "source_draw": label,
             "source_number": number,
