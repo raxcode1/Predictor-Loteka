@@ -185,13 +185,74 @@ def _normalize_stats(raw: Any) -> dict[str, int]:
     return stats
 
 
-def _migrate_records(records: list[Any]) -> tuple[list[dict], int]:
-    """Conserva sólo los registros con la matriz en vivo.
+def _rebuild_forecasts_from_lists(record: dict) -> None:
+    """Rellena m1-p5/h1-ph5 desde markov/heuristic si faltan."""
+    markov_list = list(record.get("markov") or [])
+    heuristic_list = list(record.get("heuristic") or [])
+    probs = (record.get("matrix") or {}).get("probabilities") or {}
+    if not isinstance(probs, dict):
+        probs = {}
+    markov_forecast = record.get("markov_forecast") or []
+    if not markov_forecast and markov_list:
+        rebuilt = []
+        for n, _ in markov_list[:5]:
+            try:
+                rebuilt.append({"number": int(n), "probability": float(probs.get(n, probs.get(str(n), 0.0)))})
+            except Exception:
+                continue
+        if rebuilt:
+            record["markov_forecast"] = rebuilt
+    heuristic_forecast = record.get("heuristic_forecast") or []
+    if not heuristic_forecast and heuristic_list:
+        rebuilt = []
+        for n, _ in heuristic_list[:5]:
+            try:
+                rebuilt.append({"number": int(n), "probability": float(probs.get(n, probs.get(str(n), 0.0)))})
+            except Exception:
+                continue
+        if rebuilt:
+            record["heuristic_forecast"] = rebuilt
+    mf = record.get("markov_forecast") or []
+    hf = record.get("heuristic_forecast") or []
+    if record.get("m1") is None and len(mf) > 0:
+        try: record["m1"] = mf[0].get("number"); record["p1"] = mf[0].get("probability")
+        except Exception: pass
+    if record.get("m2") is None and len(mf) > 1:
+        try: record["m2"] = mf[1].get("number"); record["p2"] = mf[1].get("probability")
+        except Exception: pass
+    if record.get("m3") is None and len(mf) > 2:
+        try: record["m3"] = mf[2].get("number"); record["p3"] = mf[2].get("probability")
+        except Exception: pass
+    if record.get("m4") is None and len(mf) > 3:
+        try: record["m4"] = mf[3].get("number"); record["p4"] = mf[3].get("probability")
+        except Exception: pass
+    if record.get("m5") is None and len(mf) > 4:
+        try: record["m5"] = mf[4].get("number"); record["p5"] = mf[4].get("probability")
+        except Exception: pass
+    if record.get("h1") is None and len(hf) > 0:
+        try: record["h1"] = hf[0].get("number"); record["ph1"] = hf[0].get("probability")
+        except Exception: pass
+    if record.get("h2") is None and len(hf) > 1:
+        try: record["h2"] = hf[1].get("number"); record["ph2"] = hf[1].get("probability")
+        except Exception: pass
+    if record.get("h3") is None and len(hf) > 2:
+        try: record["h3"] = hf[2].get("number"); record["ph3"] = hf[2].get("probability")
+        except Exception: pass
+    if record.get("h4") is None and len(hf) > 3:
+        try: record["h4"] = hf[3].get("number"); record["ph4"] = hf[3].get("probability")
+        except Exception: pass
+    if record.get("h5") is None and len(hf) > 4:
+        try: record["h5"] = hf[4].get("number"); record["ph5"] = hf[4].get("probability")
+        except Exception: pass
 
-    El registro que dejó la versión anterior de la API guardaba el ranking
-    Markov y el heurístico, pero no la matriz de diez submodelos ni la
-    decisión de la alerta: sin esos datos la ronda no puede reevaluarse, así
-    que se descarta y el monitor vuelve a retroanalizar el histórico.
+
+def _migrate_records(records: list[Any]) -> tuple[list[dict], int]:
+    """Conserva sÃ³lo los registros con la matriz en vivo.
+
+    El registro que dejÃ³ la versiÃ³n anterior de la API guardaba el ranking
+    Markov y el heurÃ­stico, pero no la matriz de diez submodelos ni la
+    decisiÃ³n de la alerta: sin esos datos la ronda no puede reevaluarse, asÃ­
+    que se descarta y el monitor vuelve a retroanalizar el histÃ³rico.
     """
     migrated: list[dict] = []
     dropped = 0
@@ -210,6 +271,7 @@ def _migrate_records(records: list[Any]) -> tuple[list[dict], int]:
             except ValueError:
                 dropped += 1
                 continue
+        _rebuild_forecasts_from_lists(item)
         migrated.append(item)
     return migrated, dropped
 
@@ -528,7 +590,7 @@ class LiveMonitor:
         draws: list[tuple[int, str, int]],
         engine: AlertEngine,
     ) -> None:
-        """Cierra las rondas pendientes cuyo resultado ya está publicado."""
+        """Cierra las rondas pendientes cuyo resultado ya estÃ¡ publicado."""
         for record in state.predictions:
             if record.get("status") != STATUS_PENDIENTE:
                 continue
@@ -550,6 +612,7 @@ class LiveMonitor:
                 )
                 state.dirty = True
                 continue
+            _rebuild_forecasts_from_lists(record)
             self._close(engine, record, label, value, state)
 
     def _open(
@@ -605,6 +668,8 @@ class LiveMonitor:
     def payload(self) -> dict:
         """Estado completo del monitor, listo para la API y la interfaz."""
         state = self._state
+        for record in state.predictions:
+            _rebuild_forecasts_from_lists(record)
         pending = next(
             (
                 record
@@ -730,9 +795,74 @@ class LiveMonitor:
         return history
 
     def _public_record(self, record: dict) -> dict:
-        """VersiÃ³n ligera del registro para el navegador."""
+        """Versión ligera del registro para el navegador."""
         decision = record.get("decision") or {}
         stake = decision.get("stake") or {}
+        markov_forecast = record.get("markov_forecast") or []
+        heuristic_forecast = record.get("heuristic_forecast") or []
+
+        m1 = record.get("m1"); p1 = record.get("p1")
+        m2 = record.get("m2"); p2 = record.get("p2")
+        m3 = record.get("m3"); p3 = record.get("p3")
+        m4 = record.get("m4"); p4 = record.get("p4")
+        m5 = record.get("m5"); p5 = record.get("p5")
+        if m1 is None and len(markov_forecast) > 0:
+            try:
+                m1 = markov_forecast[0].get("number"); p1 = markov_forecast[0].get("probability")
+            except Exception:
+                pass
+        if m2 is None and len(markov_forecast) > 1:
+            try:
+                m2 = markov_forecast[1].get("number"); p2 = markov_forecast[1].get("probability")
+            except Exception:
+                pass
+        if m3 is None and len(markov_forecast) > 2:
+            try:
+                m3 = markov_forecast[2].get("number"); p3 = markov_forecast[2].get("probability")
+            except Exception:
+                pass
+        if m4 is None and len(markov_forecast) > 3:
+            try:
+                m4 = markov_forecast[3].get("number"); p4 = markov_forecast[3].get("probability")
+            except Exception:
+                pass
+        if m5 is None and len(markov_forecast) > 4:
+            try:
+                m5 = markov_forecast[4].get("number"); p5 = markov_forecast[4].get("probability")
+            except Exception:
+                pass
+
+        h1 = record.get("h1"); ph1 = record.get("ph1")
+        h2 = record.get("h2"); ph2 = record.get("ph2")
+        h3 = record.get("h3"); ph3 = record.get("ph3")
+        h4 = record.get("h4"); ph4 = record.get("ph4")
+        h5 = record.get("h5"); ph5 = record.get("ph5")
+        if h1 is None and len(heuristic_forecast) > 0:
+            try:
+                h1 = heuristic_forecast[0].get("number"); ph1 = heuristic_forecast[0].get("probability")
+            except Exception:
+                pass
+        if h2 is None and len(heuristic_forecast) > 1:
+            try:
+                h2 = heuristic_forecast[1].get("number"); ph2 = heuristic_forecast[1].get("probability")
+            except Exception:
+                pass
+        if h3 is None and len(heuristic_forecast) > 2:
+            try:
+                h3 = heuristic_forecast[2].get("number"); ph3 = heuristic_forecast[2].get("probability")
+            except Exception:
+                pass
+        if h4 is None and len(heuristic_forecast) > 3:
+            try:
+                h4 = heuristic_forecast[3].get("number"); ph4 = heuristic_forecast[3].get("probability")
+            except Exception:
+                pass
+        if h5 is None and len(heuristic_forecast) > 4:
+            try:
+                h5 = heuristic_forecast[4].get("number"); ph5 = heuristic_forecast[4].get("probability")
+            except Exception:
+                pass
+
         return {
             "source_draw": record.get("source_draw"),
             "created_at": record.get("created_at"),
@@ -741,28 +871,18 @@ class LiveMonitor:
             "actual_number": record.get("actual_number"),
             "markov_rank": record.get("markov_rank"),
             "heuristic_rank": record.get("heuristic_rank"),
-            "markov_forecast": record.get("markov_forecast") or [],
-            "heuristic_forecast": record.get("heuristic_forecast") or [],
-            "m1": record.get("m1"),
-            "p1": record.get("p1"),
-            "m2": record.get("m2"),
-            "p2": record.get("p2"),
-            "m3": record.get("m3"),
-            "p3": record.get("p3"),
-            "m4": record.get("m4"),
-            "p4": record.get("p4"),
-            "m5": record.get("m5"),
-            "p5": record.get("p5"),
-            "h1": record.get("h1"),
-            "ph1": record.get("ph1"),
-            "h2": record.get("h2"),
-            "ph2": record.get("ph2"),
-            "h3": record.get("h3"),
-            "ph3": record.get("ph3"),
-            "h4": record.get("h4"),
-            "ph4": record.get("ph4"),
-            "h5": record.get("h5"),
-            "ph5": record.get("ph5"),
+            "markov_forecast": markov_forecast,
+            "heuristic_forecast": heuristic_forecast,
+            "m1": m1, "p1": p1,
+            "m2": m2, "p2": p2,
+            "m3": m3, "p3": p3,
+            "m4": m4, "p4": p4,
+            "m5": m5, "p5": p5,
+            "h1": h1, "ph1": ph1,
+            "h2": h2, "ph2": ph2,
+            "h3": h3, "ph3": ph3,
+            "h4": h4, "ph4": ph4,
+            "h5": h5, "ph5": ph5,
             "matched": record.get("matched"),
             "alert_fired": bool(decision.get("fired")),
             "alert_hit": record.get("alert_hit"),
