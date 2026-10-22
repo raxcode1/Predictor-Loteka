@@ -359,6 +359,14 @@ class LiveMonitor:
                 self._persist(self._state)
             except Exception:
                 pass
+        else:
+            if self._state.predictions and len(self._state.predictions) > 2:
+                self._state.predictions = self._state.predictions[-2:]
+                self._state.dirty = True
+                try:
+                    self._persist(self._state)
+                except Exception:
+                    pass
         return self._state
 
     def _persist(self, state: _State) -> None:
