@@ -21,7 +21,7 @@ import random
 # =============================================================================
 #  CAMBIA AQUÍ los segundos entre consultas. Acepta 15 o más.
 # =============================================================================
-INTERVALO_SINCRONIZACION = random.randint(20, 60)  # segundos entre consultas
+INTERVALO_SINCRONIZACION = random.randint(23, 47)  # segundos entre consultas
 
 #: Límites aceptados para el intervalo, en segundos.
 INTERVALO_MINIMO = 15
