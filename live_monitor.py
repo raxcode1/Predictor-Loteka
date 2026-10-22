@@ -283,13 +283,7 @@ def _rebuild_forecasts_from_lists(record: dict) -> None:
 
 
 def _migrate_records(records: list[Any]) -> tuple[list[dict], int]:
-    """Conserva sÃ³lo los registros con la matriz en vivo.
-
-    El registro que dejÃ³ la versiÃ³n anterior de la API guardaba el ranking
-    Markov y el heurÃ­stico, pero no la matriz de diez submodelos ni la
-    decisiÃ³n de la alerta: sin esos datos la ronda no puede reevaluarse, asÃ­
-    que se descarta y el monitor vuelve a retroanalizar el histÃ³rico.
-    """
+    """Conserva sÃ³lo los registros con la matriz en vivo."""
     migrated: list[dict] = []
     dropped = 0
     for record in records:
@@ -307,7 +301,6 @@ def _migrate_records(records: list[Any]) -> tuple[list[dict], int]:
             except ValueError:
                 dropped += 1
                 continue
-        _rebuild_forecasts_from_lists(item)
         migrated.append(item)
     return migrated, dropped
 
@@ -452,10 +445,7 @@ class LiveMonitor:
             if n is None:
                 continue
             p = probabilities.get(name)
-            try:
-                markov_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
-            except Exception:
-                continue
+            markov_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
 
         heuristic_forecast = []
         for name in ["H1", "H2", "H3", "H4", "H5"]:
@@ -463,10 +453,7 @@ class LiveMonitor:
             if n is None:
                 continue
             p = probabilities.get(name)
-            try:
-                heuristic_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
-            except Exception:
-                continue
+            heuristic_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
 
         record = {
             "source_draw": label,
@@ -717,8 +704,6 @@ class LiveMonitor:
     def payload(self) -> dict:
         """Estado completo del monitor, listo para la API y la interfaz."""
         state = self._state
-        for record in state.predictions:
-            _rebuild_forecasts_from_lists(record)
         pending = next(
             (
                 record
@@ -854,44 +839,11 @@ class LiveMonitor:
         m3 = record.get("m3"); p3 = record.get("p3")
         m4 = record.get("m4"); p4 = record.get("p4")
         m5 = record.get("m5"); p5 = record.get("p5")
-        if len(markov_forecast) > 0:
-            if m1 is None: m1 = markov_forecast[0].get("number")
-            if p1 is None: p1 = markov_forecast[0].get("probability")
-        if len(markov_forecast) > 1:
-            if m2 is None: m2 = markov_forecast[1].get("number")
-            if p2 is None: p2 = markov_forecast[1].get("probability")
-        if len(markov_forecast) > 2:
-            if m3 is None: m3 = markov_forecast[2].get("number")
-            if p3 is None: p3 = markov_forecast[2].get("probability")
-        if len(markov_forecast) > 3:
-            if m4 is None: m4 = markov_forecast[3].get("number")
-            if p4 is None: p4 = markov_forecast[3].get("probability")
-        if len(markov_forecast) > 4:
-            if m5 is None: m5 = markov_forecast[4].get("number")
-            if p5 is None: p5 = markov_forecast[4].get("probability")
-        if len(markov_forecast) == 0 and (m1 is not None or m2 is not None):
-            pass
-
         h1 = record.get("h1"); ph1 = record.get("ph1")
         h2 = record.get("h2"); ph2 = record.get("ph2")
         h3 = record.get("h3"); ph3 = record.get("ph3")
         h4 = record.get("h4"); ph4 = record.get("ph4")
         h5 = record.get("h5"); ph5 = record.get("ph5")
-        if len(heuristic_forecast) > 0:
-            if h1 is None: h1 = heuristic_forecast[0].get("number")
-            if ph1 is None: ph1 = heuristic_forecast[0].get("probability")
-        if len(heuristic_forecast) > 1:
-            if h2 is None: h2 = heuristic_forecast[1].get("number")
-            if ph2 is None: ph2 = heuristic_forecast[1].get("probability")
-        if len(heuristic_forecast) > 2:
-            if h3 is None: h3 = heuristic_forecast[2].get("number")
-            if ph3 is None: ph3 = heuristic_forecast[2].get("probability")
-        if len(heuristic_forecast) > 3:
-            if h4 is None: h4 = heuristic_forecast[3].get("number")
-            if ph4 is None: ph4 = heuristic_forecast[3].get("probability")
-        if len(heuristic_forecast) > 4:
-            if h5 is None: h5 = heuristic_forecast[4].get("number")
-            if ph5 is None: ph5 = heuristic_forecast[4].get("probability")
 
         return {
             "source_draw": record.get("source_draw"),
@@ -914,8 +866,8 @@ class LiveMonitor:
             "h4": h4, "ph4": ph4,
             "h5": h5, "ph5": ph5,
             "matched": record.get("matched"),
-            "alert_fired": bool((record.get("decision") or {}).get("fired")),
+            "alert_fired": bool(decision.get("fired")),
             "alert_hit": record.get("alert_hit"),
-            "alert_number": (record.get("decision") or {}).get("number"),
-            "alert_probability": (record.get("decision") or {}).get("probability"),
+            "alert_number": decision.get("number"),
+            "alert_probability": decision.get("probability"),
         }
