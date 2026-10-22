@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import re
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -64,16 +66,21 @@ def extract_results(html: str) -> list[dict[str, str]]:
 
     section_end = html.find("</ul>", section_start)
     section = html[section_start:section_end if section_end >= 0 else None]
-    today = datetime.now(TIME_ZONE).strftime("%d/%m/%Y")
+    today = datetime.now(TIME_ZONE).date()
     results = []
 
     for match in ROW_PATTERN.finditer(section):
         number = int(match.group("numero"))
         if not 0 <= number <= 18:
             continue
+        draw_time = datetime.strptime(
+            match.group("hora").upper().replace(" ", ""), "%I:%M%p"
+        ).time()
+        # Loteka ofrece el histórico diario por endpoint. Inferir fecha por hora
+        # falla en días previos o cuando el home trae sorteos de varias jornadas.
         results.append(
             {
-                "Fecha": today,
+                "Fecha": "",
                 "Hora": match.group("hora").upper(),
                 "No_Sorteo": f"No. {match.group('sorteo')}",
                 "Numero": f"{number:02d}",
@@ -82,7 +89,96 @@ def extract_results(html: str) -> list[dict[str, str]]:
 
     if not results:
         raise RuntimeError("No se pudieron extraer resultados de Ruleta Express.")
+    results.sort(
+        key=lambda row: int(row["No_Sorteo"].split()[-1]), reverse=True
+    )
     return results
+
+
+def fetch_history_date(day: date) -> list[dict[str, str]]:
+    "Recupera todos los resultados publicados por Loteka para una fecha."
+    params = urlencode({"fechaSeleccionada": day.strftime("%d/%m/%Y")})
+    request = Request(
+        f"https://loteka.com.do/wp-content/themes/loteka/getRuletaExpress.php?{params}",
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://loteka.com.do/"},
+    )
+    with urlopen(request, timeout=30) as response:
+        html = response.read().decode("utf-8", errors="replace")
+    historical = []
+    historical_pattern = re.compile(
+        r'<li[^>]*>.*?'
+        r'<span[^>]*>\s*(?P<hora>\d{1,2}:\d{2}\s*[AP]M)\s*</span>\s*'
+        r'<span[^>]*>\s*No\.\s*(?P<sorteo>\d+)\s*</span>.*?'
+        r'<span[^>]*class="numero"[^>]*>\s*(?P<numero>\d{1,2})\s*</span>.*?</li>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    for match in historical_pattern.finditer(html):
+        number = int(match.group("numero"))
+        if 0 <= number <= 18:
+            historical.append({
+                "Fecha": day.strftime("%d/%m/%Y"),
+                "Hora": match.group("hora").upper(),
+                "No_Sorteo": f"No. {match.group('sorteo')}",
+                "Numero": f"{number:02d}",
+            })
+    return historical
+
+def backfill_missing_draws(frame: pd.DataFrame, fresh_rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    "Consulta fechas que enmarcan huecos y devuelve sorteos históricos confirmados."
+    if frame.empty:
+        return []
+    known: dict[int, dict[str, str]] = {}
+    for row in frame.to_dict(orient="records"):
+        match = re.search(r"(\d+)$", str(row.get("No_Sorteo", "")))
+        if match:
+            known[int(match.group(1))] = row
+    incoming = {}
+    for row in fresh_rows:
+        match = re.search(r"(\d+)$", row.get("No_Sorteo", ""))
+        if match:
+            incoming[int(match.group(1))] = row
+    known.update(incoming)
+    ids = set(known)
+    if not ids:
+        return []
+    min_id, max_id = min(ids), max(ids)
+    holes = set(range(min_id, max_id + 1)) - ids
+    if not holes:
+        return []
+    dated = {}
+    for draw, row in known.items():
+        try:
+            dated[draw] = datetime.strptime(str(row.get("Fecha", "")), "%d/%m/%Y").date()
+        except ValueError:
+            pass
+    ordered = sorted(dated)
+    query_days = set()
+    for hole in holes:
+        hi = next((n for n in ordered if n > hole), None)
+        lo = next((n for n in reversed(ordered) if n < hole), None)
+        if hi is None or lo is None:
+            continue
+        hi_date, lo_date = dated[hi], dated[lo]
+        start, end = (hi_date, lo_date) if hi_date <= lo_date else (lo_date, hi_date)
+        if start == end:
+            query_days.add(start)
+        elif hi_date < lo_date:
+            query_days.update(start + timedelta(days=i) for i in range((end-start).days + 1))
+        else:
+            # El cambio de jornada produce saltos numéricos no necesariamente
+            # consecutivos; consultar la fecha del ID alto y su día vecino.
+            query_days.update((hi_date, hi_date + timedelta(days=1)))
+
+    recovered = {}
+    for day in sorted(query_days):
+        try:
+            for row in fetch_history_date(day):
+                draw = int(row["No_Sorteo"].split()[-1])
+                if draw in holes:
+                    recovered[draw] = row
+        except Exception as error:
+            print(f"Aviso: no se pudo backfillear {day:%d/%m/%Y}: {error}")
+    return list(recovered.values())
 
 
 def sync_csv(path: Path, results: list[dict[str, str]]) -> int:
@@ -94,22 +190,17 @@ def sync_csv(path: Path, results: list[dict[str, str]]) -> int:
     else:
         frame = pd.DataFrame(columns=EXPECTED_COLUMNS)
 
-    known_draws = set(frame["No_Sorteo"].dropna().astype(str))
-    new_rows = [row for row in results if row["No_Sorteo"] not in known_draws]
-    updated = pd.concat([frame, pd.DataFrame(new_rows)], ignore_index=True)
+    fresh_rows = pd.DataFrame(results, columns=EXPECTED_COLUMNS)
+    missing_rows = backfill_missing_draws(frame, results)
+    if missing_rows:
+        print(f"Backfill desde archivo histórico: {len(missing_rows)} sorteos recuperados.")
+    updated = pd.concat([frame, fresh_rows, pd.DataFrame(missing_rows)], ignore_index=True)
+    original_draws = set(frame["No_Sorteo"].dropna().astype(str)) if not frame.empty else set()
     updated = updated.drop_duplicates(subset=["No_Sorteo"], keep="last")
-    updated["_sorteo_num"] = (
-        updated["No_Sorteo"]
-        .str.extract(r"(\d+)", expand=False)
-        .astype("int64")
-    )
-    updated = updated.sort_values(
-        "_sorteo_num",
-        ascending=False,
-        kind="stable",
-    ).drop(columns="_sorteo_num")
+    updated["_sorteo_num"] = updated["No_Sorteo"].str.extract(r"(\d+)", expand=False).astype("int64")
+    updated = updated.sort_values("_sorteo_num", ascending=False, kind="stable").drop(columns="_sorteo_num")
     updated.to_csv(path, index=False, encoding="utf-8-sig")
-    return len(new_rows)
+    return len(set(updated["No_Sorteo"].dropna().astype(str)) - original_draws)
 
 
 def run_once(path: Path) -> None:
@@ -147,6 +238,21 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--path",
+        type=Path,
+        default=Path(__file__).with_name("Resultados_RuletaExpress.csv"),
+        help="Ruta del CSV que se actualizará (por defecto el histórico del proyecto).",
+    )
+    parser.add_argument(
+        "--bootstrap-history",
+        action="store_true",
+        help=(
+            "Permite inicializar un CSV vacío si Loteka está publicando al menos "
+            "los resultados más recientes. Por seguridad, no reduce ni reemplaza "
+            "un histórico local que ya tenga datos."
+        ),
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help=(
@@ -157,6 +263,15 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.watch is None:
+        if args.bootstrap_history:
+            bootstrap_path = args.path
+            if bootstrap_path.exists() and bootstrap_path.stat().st_size > 0:
+                raise SystemExit(
+                    f"El archivo {bootstrap_path} ya existe y no está vacío; "
+                    "se cancela para proteger el histórico."
+                )
+            run_once(args.path)
+            return
         if not args.force and not horario_loteka.abierto():
             local = horario_loteka.ahora()
             estado = horario_loteka.estado()
@@ -168,7 +283,7 @@ def main() -> None:
                 "Usa --force para consultar de todas formas."
             )
             return
-        run_once(CSV_PATH)
+        run_once(args.path)
         return
     intervalo_valido(args.watch)
 
@@ -188,7 +303,7 @@ def main() -> None:
             )
             continue
         try:
-            run_once(CSV_PATH)
+            run_once(args.path)
         except Exception as error:
             print(f"Error de sincronización: {error}")
         time.sleep(args.watch)

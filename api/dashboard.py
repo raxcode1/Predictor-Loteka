@@ -37,6 +37,7 @@ BLOB_PATH = "Resultados_RuletaExpress.csv"
 PREDICTIONS_PATH = "ruleta_predictions.json"
 BLOB_TOKEN = os.environ.get("BLOB_READ_WRITE_TOKEN")
 BLOB_HOST = "https://blob.vercel-storage.com"
+LOCAL_CSV = Path(__file__).resolve().parents[1] / BLOB_PATH
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 
 _cached_draw: str | None = None
@@ -75,22 +76,23 @@ def read_csv_bytes(data: bytes) -> list[dict[str, str]]:
 
 
 def read_rows() -> list[dict[str, str]]:
-    try:
-        if not BLOB_TOKEN:
-            return read_csv_bytes(LOCAL_CSV.read_bytes())
+    "Carga el CSV remoto y combina el histórico versionado como respaldo/base."
+    local_rows: list[dict[str, str]] = []
+    if LOCAL_CSV.exists():
         try:
-            return read_csv_bytes(blob_request("GET", BLOB_PATH))
-        except HTTPError as error:
-            if error.code != 404:
-                return []
-            return read_csv_bytes(LOCAL_CSV.read_bytes())
-    except Exception:
-        try:
-            if LOCAL_CSV.exists():
-                return read_csv_bytes(LOCAL_CSV.read_bytes())
+            local_rows = read_csv_bytes(LOCAL_CSV.read_bytes())
         except Exception:
-            pass
-        return []
+            local_rows = []
+
+    if not BLOB_TOKEN:
+        return local_rows
+    try:
+        remote_rows = read_csv_bytes(blob_request("GET", BLOB_PATH))
+    except Exception:
+        return local_rows
+    # Blob puede contener un histórico truncado/desactualizado. No permitir que
+    # esos datos sustituyan el CSV completo incluido en el deployment.
+    return merge_results(local_rows, remote_rows)
 
 
 def serialize_rows(rows: list[dict[str, str]]) -> bytes:
@@ -198,7 +200,7 @@ def dashboard() -> dict:
     if horario["abierto"]:
         try:
             current = merge_results(rows, extract_results(fetch_page()))
-            if BLOB_TOKEN and serialize_rows(current) != serialize_rows(rows):
+            if BLOB_TOKEN and len(current) >= len(rows) and serialize_rows(current) != serialize_rows(rows):
                 try:
                     blob_request(
                         "PUT",

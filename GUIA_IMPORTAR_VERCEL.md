@@ -161,14 +161,15 @@ pausado, al volver a recibir una petición se detectan los números de sorteo
 omitidos: se registran como pausa y no cuentan como aciertos ni fallos.
 
 ## 7. Primer uso del histórico
+La función combina siempre el CSV incluido en el repositorio con el archivo de
+Blob, deduplicando por `No_Sorteo`. Así, un Blob antiguo o truncado no reemplaza
+ni oculta el histórico completo del proyecto. Al sincronizar, se vuelve a guardar
+la unión cuando crece el conjunto de datos.
 
-Si `Resultados_RuletaExpress.csv` todavía no existe en Blob, la función usa el
-CSV incluido en el repositorio como base inicial. Cuando consulta Loteka y
-encuentra resultados, guarda la versión combinada y deduplicada en Blob.
-
-Los siguientes deployments seguirán utilizando el archivo guardado en Blob,
-por lo que los resultados no dependen del sistema de archivos temporal de
-Vercel.
+Antes de desplegar, ejecuta `python sync_ruleta_express.py --force` para actualizar
+el histórico local desde Loteka. Para inicializar un CSV realmente vacío,
+ejecuta `python sync_ruleta_express.py --bootstrap-history`; se niega a
+sobrescribir un archivo que ya contiene datos.
 
 ## 8. Problemas frecuentes
 
