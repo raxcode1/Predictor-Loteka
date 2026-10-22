@@ -355,6 +355,10 @@ class LiveMonitor:
             self._state.dirty = True
             self._migrated = False
             self._loaded = True
+            try:
+                self._persist(self._state)
+            except Exception:
+                pass
         return self._state
 
     def _persist(self, state: _State) -> None:
