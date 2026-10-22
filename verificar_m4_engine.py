@@ -34,7 +34,7 @@ from m4_engine.stats import (
 )
 from m4_engine.validation import validate_strategy
 from live_models import LiveModelEngine
-from live_monitor import LiveMonitor, memory_store
+from live_monitor import LiveMonitor, PREDICTIONS_START_DRAW, memory_store
 
 CSV_PATH = (
     Path(__file__).resolve().parent
@@ -325,7 +325,7 @@ def main() -> int:
         {
             "Fecha": "01/01/2026",
             "Hora": "12:00 PM",
-            "No_Sorteo": f"No. {1001 + index}",
+            "No_Sorteo": f"No. {PREDICTIONS_START_DRAW + index}",
             "Numero": f"{value:02d}",
         }
         for index, value in enumerate(values)
@@ -349,6 +349,13 @@ def main() -> int:
     ]
     pending = [item for item in live_predictions if item["status"] == "pendiente"]
     check("el monitor guarda las rondas evaluadas", len(live_predictions) >= 30, f"n={len(live_predictions)}")
+    check(
+        "no se guardan predicciones anteriores al sorteo de corte",
+        all(
+            int(item["source_draw"].split()[-1]) >= PREDICTIONS_START_DRAW
+            for item in live_predictions
+        ),
+    )
     check("cada ronda evaluada tiene resultado", all(item["actual_number"] is not None for item in resolved))
     check("queda una sola ronda pendiente", len(pending) == 1, f"n={len(pending)}")
     check(

@@ -40,7 +40,11 @@ from m4_engine.kelly import KellyConfig
 from live_models import OUTPUT_MODULUS, LiveForecast, build_forecasts
 from state_recovery import build_recovery_rankings, select_markov_model
 
-STORE_VERSION = 2
+STORE_VERSION = 3
+
+#: Las predicciones anteriores a este sorteo usaron datos incompletos y se
+#: descartan; el registro se reconstruye desde este número en adelante.
+PREDICTIONS_START_DRAW = 249853
 
 STATUS_PENDIENTE = "pendiente"
 STATUS_ACIERTO = "acierto"
@@ -350,6 +354,18 @@ class LiveMonitor:
         if not self._loaded:
             stored = self.load_store() or {}
             predictions, dropped = _migrate_records(list(stored.get("predictions") or []))
+            eligible = []
+            for record in predictions:
+                try:
+                    number = int(record.get("source_number"))
+                except (TypeError, ValueError):
+                    dropped += 1
+                    continue
+                if number >= PREDICTIONS_START_DRAW:
+                    eligible.append(record)
+                else:
+                    dropped += 1
+            predictions = eligible
             try:
                 stored_version = int(stored.get("version", 0))
             except (TypeError, ValueError):
@@ -623,6 +639,8 @@ class LiveMonitor:
         for offset, forecast in enumerate(forecasts):
             index = first_index + offset
             number, label, _ = draws[index]
+            if number < PREDICTIONS_START_DRAW:
+                continue
             record = self._build_record(label, number, forecast)
             record["decision"] = self._evaluate(engine, record)
             state.predictions.append(record)
@@ -686,6 +704,8 @@ class LiveMonitor:
         if not forecasts:
             return
         number, label, _ = draws[-1]
+        if number < PREDICTIONS_START_DRAW:
+            return
         if any(record.get("source_number") == number for record in state.predictions):
             return
 
