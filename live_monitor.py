@@ -452,21 +452,10 @@ class LiveMonitor:
             if n is None:
                 continue
             p = probabilities.get(name)
-            if p is None:
-                try:
-                    p = float((forecast.probabilities or {}).get(name, 0.0))
-                except Exception:
-                    p = 0.0
             try:
-                markov_forecast.append({"number": int(n), "probability": float(p)})
+                markov_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
             except Exception:
                 continue
-        if not markov_forecast:
-            for n, _ in markov_list[:5]:
-                try:
-                    markov_forecast.append({"number": int(n), "probability": float(probabilities.get(n, (forecast.probabilities or {}).get(str(n), 0.0)))})
-                except Exception:
-                    continue
 
         heuristic_forecast = []
         for name in ["H1", "H2", "H3", "H4", "H5"]:
@@ -474,21 +463,10 @@ class LiveMonitor:
             if n is None:
                 continue
             p = probabilities.get(name)
-            if p is None:
-                try:
-                    p = float((forecast.probabilities or {}).get(name, 0.0))
-                except Exception:
-                    p = 0.0
             try:
-                heuristic_forecast.append({"number": int(n), "probability": float(p)})
+                heuristic_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
             except Exception:
                 continue
-        if not heuristic_forecast:
-            for n, _ in heuristic_list[:5]:
-                try:
-                    heuristic_forecast.append({"number": int(n), "probability": float(probabilities.get(n, (forecast.probabilities or {}).get(str(n), 0.0)))})
-                except Exception:
-                    continue
 
         record = {
             "source_draw": label,
@@ -868,7 +846,6 @@ class LiveMonitor:
     def _public_record(self, record: dict) -> dict:
         """Versión ligera del registro para el navegador."""
         decision = record.get("decision") or {}
-        stake = decision.get("stake") or {}
         markov_forecast = record.get("markov_forecast") or []
         heuristic_forecast = record.get("heuristic_forecast") or []
 
@@ -877,62 +854,44 @@ class LiveMonitor:
         m3 = record.get("m3"); p3 = record.get("p3")
         m4 = record.get("m4"); p4 = record.get("p4")
         m5 = record.get("m5"); p5 = record.get("p5")
-        if m1 is None and len(markov_forecast) > 0:
-            try:
-                m1 = markov_forecast[0].get("number"); p1 = markov_forecast[0].get("probability")
-            except Exception:
-                pass
-        if m2 is None and len(markov_forecast) > 1:
-            try:
-                m2 = markov_forecast[1].get("number"); p2 = markov_forecast[1].get("probability")
-            except Exception:
-                pass
-        if m3 is None and len(markov_forecast) > 2:
-            try:
-                m3 = markov_forecast[2].get("number"); p3 = markov_forecast[2].get("probability")
-            except Exception:
-                pass
-        if m4 is None and len(markov_forecast) > 3:
-            try:
-                m4 = markov_forecast[3].get("number"); p4 = markov_forecast[3].get("probability")
-            except Exception:
-                pass
-        if m5 is None and len(markov_forecast) > 4:
-            try:
-                m5 = markov_forecast[4].get("number"); p5 = markov_forecast[4].get("probability")
-            except Exception:
-                pass
+        if len(markov_forecast) > 0:
+            if m1 is None: m1 = markov_forecast[0].get("number")
+            if p1 is None: p1 = markov_forecast[0].get("probability")
+        if len(markov_forecast) > 1:
+            if m2 is None: m2 = markov_forecast[1].get("number")
+            if p2 is None: p2 = markov_forecast[1].get("probability")
+        if len(markov_forecast) > 2:
+            if m3 is None: m3 = markov_forecast[2].get("number")
+            if p3 is None: p3 = markov_forecast[2].get("probability")
+        if len(markov_forecast) > 3:
+            if m4 is None: m4 = markov_forecast[3].get("number")
+            if p4 is None: p4 = markov_forecast[3].get("probability")
+        if len(markov_forecast) > 4:
+            if m5 is None: m5 = markov_forecast[4].get("number")
+            if p5 is None: p5 = markov_forecast[4].get("probability")
+        if len(markov_forecast) == 0 and (m1 is not None or m2 is not None):
+            pass
 
         h1 = record.get("h1"); ph1 = record.get("ph1")
         h2 = record.get("h2"); ph2 = record.get("ph2")
         h3 = record.get("h3"); ph3 = record.get("ph3")
         h4 = record.get("h4"); ph4 = record.get("ph4")
         h5 = record.get("h5"); ph5 = record.get("ph5")
-        if h1 is None and len(heuristic_forecast) > 0:
-            try:
-                h1 = heuristic_forecast[0].get("number"); ph1 = heuristic_forecast[0].get("probability")
-            except Exception:
-                pass
-        if h2 is None and len(heuristic_forecast) > 1:
-            try:
-                h2 = heuristic_forecast[1].get("number"); ph2 = heuristic_forecast[1].get("probability")
-            except Exception:
-                pass
-        if h3 is None and len(heuristic_forecast) > 2:
-            try:
-                h3 = heuristic_forecast[2].get("number"); ph3 = heuristic_forecast[2].get("probability")
-            except Exception:
-                pass
-        if h4 is None and len(heuristic_forecast) > 3:
-            try:
-                h4 = heuristic_forecast[3].get("number"); ph4 = heuristic_forecast[3].get("probability")
-            except Exception:
-                pass
-        if h5 is None and len(heuristic_forecast) > 4:
-            try:
-                h5 = heuristic_forecast[4].get("number"); ph5 = heuristic_forecast[4].get("probability")
-            except Exception:
-                pass
+        if len(heuristic_forecast) > 0:
+            if h1 is None: h1 = heuristic_forecast[0].get("number")
+            if ph1 is None: ph1 = heuristic_forecast[0].get("probability")
+        if len(heuristic_forecast) > 1:
+            if h2 is None: h2 = heuristic_forecast[1].get("number")
+            if ph2 is None: ph2 = heuristic_forecast[1].get("probability")
+        if len(heuristic_forecast) > 2:
+            if h3 is None: h3 = heuristic_forecast[2].get("number")
+            if ph3 is None: ph3 = heuristic_forecast[2].get("probability")
+        if len(heuristic_forecast) > 3:
+            if h4 is None: h4 = heuristic_forecast[3].get("number")
+            if ph4 is None: ph4 = heuristic_forecast[3].get("probability")
+        if len(heuristic_forecast) > 4:
+            if h5 is None: h5 = heuristic_forecast[4].get("number")
+            if ph5 is None: ph5 = heuristic_forecast[4].get("probability")
 
         return {
             "source_draw": record.get("source_draw"),
@@ -955,8 +914,8 @@ class LiveMonitor:
             "h4": h4, "ph4": ph4,
             "h5": h5, "ph5": ph5,
             "matched": record.get("matched"),
-            "alert_fired": bool(decision.get("fired")),
+            "alert_fired": bool((record.get("decision") or {}).get("fired")),
             "alert_hit": record.get("alert_hit"),
-            "alert_number": decision.get("number"),
-            "alert_probability": decision.get("probability"),
+            "alert_number": (record.get("decision") or {}).get("number"),
+            "alert_probability": (record.get("decision") or {}).get("probability"),
         }
