@@ -227,4 +227,3 @@ deployment automáticamente. Para producción también puedes ejecutar:
 ```powershell
 npx vercel --prod
 ```
-
