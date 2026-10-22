@@ -347,14 +347,13 @@ class LiveMonitor:
     # ------------------------------------------------------------------
     def _load(self) -> _State:
         if not self._loaded:
-            stored = self.load_store() or {}
-            predictions, dropped = _migrate_records(list(stored.get("predictions") or []))
             self._state = _State(
-                predictions=predictions,
-                pauses=list(stored.get("pauses") or []),
-                stats=_normalize_stats(stored.get("stats")) if not dropped else _empty_stats(),
+                predictions=[],
+                pauses=[],
+                stats=_empty_stats(),
             )
-            self._migrated = dropped > 0
+            self._state.dirty = True
+            self._migrated = False
             self._loaded = True
         return self._state
 
