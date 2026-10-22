@@ -155,13 +155,8 @@ def main() -> None:
         try:
             daily = fetch_date(day)
             day_recovered = 0
-            daily_ids = [draw_id(row) for row in daily]
-            # Si Loteka entrega una jornada, su numeración permite recuperar
-            # huecos del CSV aunque la plantilla haya omitido filas del HTML.
-            if daily_ids:
-                for number in holes.intersection(range(min(daily_ids), max(daily_ids) + 1)):
-                    recovered[number] = {"Fecha": day.strftime("%d/%m/%Y"), "Hora": "", "No_Sorteo": f"No. {number}", "Numero": ""}
-                    source_day_for_draw[number] = day
+            # Sólo se incorporan sorteos con resultado confirmado: crear filas
+            # con Numero vacío contamina el CSV y rompe los análisis.
             for row in daily:
                 number = draw_id(row)
                 if number in holes:

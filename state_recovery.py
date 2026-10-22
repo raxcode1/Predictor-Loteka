@@ -46,6 +46,13 @@ LCGS = (
 )
 
 
+def numeric_outputs(frame: pd.DataFrame) -> pd.Series:
+    "Convierte Numero en enteros, ignorando filas vacías, de texto o no finitas."
+    numbers = pd.to_numeric(frame[OUTPUT_COLUMN], errors="coerce")
+    valid = numbers.map(lambda value: pd.notna(value) and math.isfinite(float(value)))
+    return numbers[valid].astype("int64")
+
+
 def load_outputs(path: Path) -> list[int]:
     frame = pd.read_csv(path, usecols=[OUTPUT_COLUMN], nrows=OBSERVED_COUNT + VERIFICATION_COUNT)
     if len(frame) < OBSERVED_COUNT:
@@ -53,11 +60,12 @@ def load_outputs(path: Path) -> list[int]:
             f"Se requieren al menos {OBSERVED_COUNT} filas, pero solo hay {len(frame)}."
         )
 
-    values = (
-        pd.to_numeric(frame[OUTPUT_COLUMN], errors="raise")
-        .astype("int64")
-        .tolist()
-    )
+    values = numeric_outputs(frame).tolist()
+    if len(values) < OBSERVED_COUNT:
+        raise ValueError(
+            f"Se requieren al menos {OBSERVED_COUNT} resultados válidos, "
+            f"pero solo hay {len(values)}."
+        )
     invalid = [value for value in values if not 0 <= value < OUTPUT_MODULUS]
     if invalid:
         raise ValueError(
@@ -70,7 +78,7 @@ def load_outputs(path: Path) -> list[int]:
 
 def report_sequence_diagnostics(path: Path) -> None:
     frame = pd.read_csv(path, usecols=[OUTPUT_COLUMN])
-    values = pd.to_numeric(frame[OUTPUT_COLUMN], errors="raise").astype("int64")
+    values = numeric_outputs(frame)
     repeats = int((values.iloc[1:].to_numpy() == values.iloc[:-1].to_numpy()).sum())
     transitions = max(len(values) - 1, 0)
 
@@ -325,8 +333,7 @@ def select_markov_model(values: list[int]) -> tuple[dict, list[tuple[int, float]
 def build_state_recovery(path: Path) -> dict:
     """Return the statistical recovery report in a format suitable for a UI."""
     frame = pd.read_csv(path, usecols=[OUTPUT_COLUMN])
-    values = pd.to_numeric(frame[OUTPUT_COLUMN], errors="raise").astype("int64").tolist()
-    values = list(reversed(values))
+    values = list(reversed(numeric_outputs(frame).tolist()))
     if len(values) < 2:
         raise ValueError("Se necesitan al menos dos resultados para analizar transiciones.")
 

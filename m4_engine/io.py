@@ -126,13 +126,15 @@ def load_supervision_csv(path: str | Path) -> pd.DataFrame:
         frame[f"n_{key}"] = pd.to_numeric(body.iloc[:, number_index], errors="coerce")
         frame[f"p_{key}"] = _to_float(body.iloc[:, probability_index]) / 100.0
 
-    frame["row_id"] = frame["row_id"].astype("Int64")
-    frame["draw_id"] = frame["draw_id"].astype("Int64")
-    for column in ("last_number", "result"):
-        frame[column] = frame[column].astype("Int64")
+    for column in ("row_id", "draw_id", "last_number", "result"):
+        frame[column] = frame[column].replace(
+            [float("inf"), float("-inf")], float("nan")
+        ).astype("Int64")
     for model in MODEL_ORDER:
         key = model.lower()
-        frame[f"n_{key}"] = frame[f"n_{key}"].astype("Int64")
+        frame[f"n_{key}"] = frame[f"n_{key}"].replace(
+            [float("inf"), float("-inf")], float("nan")
+        ).astype("Int64")
         frame[f"p_{key}"] = frame[f"p_{key}"].astype(float)
 
     frame.insert(0, "source_row", range(2, len(frame) + 2))

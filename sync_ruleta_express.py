@@ -32,6 +32,10 @@ if not URL.endswith("/"):
 TIME_ZONE = ZoneInfo("America/Santo_Domingo")
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 
+#: Sólo se intentan rellenar huecos de las últimas jornadas. Los huecos
+#: históricos que Loteka no publica se consultarían en cada sincronización.
+BACKFILL_RECENT_DAYS = 30
+
 ROW_PATTERN = re.compile(
     r'<li>\s*'
     r'<div[^>]*>\s*'
@@ -159,6 +163,7 @@ def backfill_missing_draws(frame: pd.DataFrame, fresh_rows: list[dict[str, str]]
         except ValueError:
             pass
     ordered = sorted(dated)
+    newest_date = max(dated.values(), default=None)
     query_days = set()
     for hole in holes:
         hi = next((n for n in ordered if n > hole), None)
@@ -166,6 +171,10 @@ def backfill_missing_draws(frame: pd.DataFrame, fresh_rows: list[dict[str, str]]
         if hi is None or lo is None:
             continue
         hi_date, lo_date = dated[hi], dated[lo]
+        if newest_date and max(hi_date, lo_date) < newest_date - timedelta(
+            days=BACKFILL_RECENT_DAYS
+        ):
+            continue
         start, end = (hi_date, lo_date) if hi_date <= lo_date else (lo_date, hi_date)
         if start == end:
             query_days.add(start)
@@ -294,8 +303,12 @@ def sync_csv(path: Path, results: list[dict[str, str]]) -> int:
         raise ValueError(
             f"{int(blank_dates.sum())} sorteos quedaron sin Fecha; no se escribe el CSV."
         )
-    updated["_sorteo_num"] = updated["No_Sorteo"].str.extract(r"(\d+)", expand=False).astype("int64")
-    updated = updated.sort_values("_sorteo_num", ascending=False, kind="stable").drop(columns="_sorteo_num")
+    updated["_sorteo_num"] = pd.to_numeric(
+        updated["No_Sorteo"].str.extract(r"(\d+)", expand=False), errors="coerce"
+    ).astype("Int64")
+    updated = updated.sort_values(
+        "_sorteo_num", ascending=False, kind="stable", na_position="last"
+    ).drop(columns="_sorteo_num")
     updated.to_csv(path, index=False, encoding="utf-8-sig")
     return len(set(updated["No_Sorteo"].dropna().astype(str)) - original_draws)
 
