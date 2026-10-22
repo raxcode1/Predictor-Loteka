@@ -248,4 +248,3 @@ git push
 El bucle local **no** hace `git push`: los commits de resultados se acumulan
 en local y los subes cuando quieras, para no disparar despliegues en cada
 sorteo.
-
