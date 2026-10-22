@@ -443,20 +443,26 @@ class LiveMonitor:
         heuristic_list = list(forecast.heuristic or [])
 
         markov_forecast = []
-        for name in ["M1", "M2", "M3", "M4", "M5"]:
-            n = numbers.get(name)
-            if n is None:
+        for n, _p in markov_list[:5]:
+            try:
+                p = None
+                if isinstance(probabilities, dict):
+                    p = probabilities.get(str(n)) if str(n) in probabilities else probabilities.get(n)
+                if p is None and isinstance(numbers, dict):
+                    pass
+                markov_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
+            except Exception:
                 continue
-            p = probabilities.get(name)
-            markov_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
 
         heuristic_forecast = []
-        for name in ["H1", "H2", "H3", "H4", "H5"]:
-            n = numbers.get(name)
-            if n is None:
+        for n, _p in heuristic_list[:5]:
+            try:
+                p = None
+                if isinstance(probabilities, dict):
+                    p = probabilities.get(str(n)) if str(n) in probabilities else probabilities.get(n)
+                heuristic_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
+            except Exception:
                 continue
-            p = probabilities.get(name)
-            heuristic_forecast.append({"number": int(n), "probability": float(p) if p is not None else None})
 
         record = {
             "source_draw": label,
