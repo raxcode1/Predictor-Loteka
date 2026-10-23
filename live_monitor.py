@@ -120,9 +120,15 @@ def json_file_store(path: Path) -> tuple[StoreLoader, StoreSaver]:
             return {}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {}
-        return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError(
+                f"No se pudo leer {path.name}; no se sobrescribe el registro."
+            ) from error
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"{path.name} no tiene un formato válido; no se sobrescribe."
+            )
+        return data
 
     def save(data: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -259,12 +265,26 @@ def _ranking_entries(raw: Any) -> list[dict]:
     return entries
 
 
+def _matrix_parts(record: dict) -> tuple[dict, dict]:
+    matrix = record.get("matrix")
+    if not isinstance(matrix, dict):
+        matrix = {}
+    numbers = matrix.get("numbers")
+    probs = matrix.get("probabilities")
+    return (
+        numbers if isinstance(numbers, dict) else {},
+        probs if isinstance(probs, dict) else {},
+    )
+
+
+def _has_live_matrix(record: dict) -> bool:
+    numbers, probs = _matrix_parts(record)
+    return bool(numbers) and bool(probs)
+
+
 def _rebuild_forecasts_from_lists(record: dict) -> None:
     """Rellena m1-p5/h1-ph5 desde markov/heuristic si faltan."""
-    numbers = dict((record.get("matrix") or {}).get("numbers") or {})
-    probs = (record.get("matrix") or {}).get("probabilities") or {}
-    if not isinstance(probs, dict):
-        probs = {}
+    numbers, probs = _matrix_parts(record)
 
     markov_forecast = list(record.get("markov_forecast") or [])
     if (not markov_forecast or any(m.get("number") is None for m in markov_forecast)):
@@ -337,24 +357,19 @@ def _rebuild_forecasts_from_lists(record: dict) -> None:
 
 
 def _migrate_records(records: list[Any]) -> tuple[list[dict], int]:
-    """Conserva sÃ³lo los registros con la matriz en vivo."""
+    """Conserva todos los registros; nunca elimina predicciones guardadas."""
     migrated: list[dict] = []
     dropped = 0
     for record in records:
         if not isinstance(record, dict):
             dropped += 1
             continue
-        matrix = record.get("matrix")
-        if not isinstance(matrix, dict) or "numbers" not in matrix or "probabilities" not in matrix:
-            dropped += 1
-            continue
         item = dict(record)
         if item.get("source_number") is None:
             try:
                 item["source_number"] = draw_number(str(item.get("source_draw", "")))
-            except ValueError:
-                dropped += 1
-                continue
+            except (TypeError, ValueError):
+                pass
         migrated.append(item)
     return migrated, dropped
 
@@ -403,21 +418,10 @@ class LiveMonitor:
         if not self._loaded:
             stored = self.load_store() or {}
             raw_predictions = list(stored.get("predictions") or [])
-            self._loaded_predictions = len(raw_predictions)
             predictions, dropped = _migrate_records(raw_predictions)
-            eligible = []
+            self._loaded_predictions = len(predictions)
             for record in predictions:
-                try:
-                    number = int(record.get("source_number"))
-                except (TypeError, ValueError):
-                    dropped += 1
-                    continue
-                if number >= PREDICTIONS_START_DRAW:
-                    _rebuild_forecasts_from_lists(record)
-                    eligible.append(record)
-                else:
-                    dropped += 1
-            predictions = eligible
+                _rebuild_forecasts_from_lists(record)
             pauses = list(stored.get("pauses") or [])
             stats = _stats_from_predictions(predictions, pauses, self.spec)
             stored_stats = _normalize_stats(stored.get("stats"))
@@ -436,8 +440,14 @@ class LiveMonitor:
         if not state.dirty:
             return
         # Protección contra borrados accidentales: si el almacén tenía
-        # predicciones, no se guarda un estado vacío.
+        # predicciones, no se guarda un estado vacío ni una lista más corta.
         if self._loaded_predictions and not state.predictions:
+            return
+        if (
+            self.max_records <= 0
+            and self._loaded_predictions
+            and len(state.predictions) < self._loaded_predictions
+        ):
             return
         payload = {
             "version": STORE_VERSION,
@@ -468,12 +478,15 @@ class LiveMonitor:
         return engine
 
     def _evaluate(self, engine: AlertEngine, record: dict) -> dict:
+        numbers, probabilities = _matrix_parts(record)
+        if not numbers or not probabilities:
+            return {}
         decision = engine.evaluate(
             {
                 "draw_id": record.get("source_number"),
                 "last_number": record.get("last_number"),
-                "numbers": record["matrix"]["numbers"],
-                "probabilities": record["matrix"]["probabilities"],
+                "numbers": numbers,
+                "probabilities": probabilities,
             }
         )
         return decision.as_dict()
@@ -734,7 +747,12 @@ class LiveMonitor:
         for record in state.predictions:
             if record.get("status") != STATUS_PENDIENTE:
                 continue
-            source = int(record["source_number"])
+            try:
+                source = int(record["source_number"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not _has_live_matrix(record):
+                continue
             following = next((item for item in draws if item[0] > source), None)
             if following is None:
                 continue
@@ -804,7 +822,7 @@ class LiveMonitor:
             except (TypeError, ValueError):
                 continue
             following = by_number.get(source + 1)
-            if following is None:
+            if following is None or not _has_live_matrix(record):
                 continue
             label, value = following
             _rebuild_forecasts_from_lists(record)

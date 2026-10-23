@@ -110,30 +110,35 @@ def prediction_store():
 
     def load() -> dict:
         try:
-            stored = json.loads(blob_request("GET", PREDICTIONS_PATH).decode("utf-8"))
+            raw = blob_request("GET", PREDICTIONS_PATH)
         except HTTPError as error:
-            if error.code == 403:
+            if error.code == 404:
                 return {}
-            if error.code != 404:
-                return {}
-            return {}
-        except Exception:
-            return {}
+            raise RuntimeError(
+                f"No se pudo leer el registro de predicciones (HTTP {error.code})."
+            ) from error
+        try:
+            stored = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise RuntimeError(
+                "El registro de predicciones está dañado; no se sobrescribe."
+            ) from error
         if isinstance(stored, list):
             return {"predictions": stored, "pauses": []}
-        return stored if isinstance(stored, dict) else {}
+        if not isinstance(stored, dict):
+            raise RuntimeError(
+                "El registro de predicciones no tiene un formato válido; no se sobrescribe."
+            )
+        return stored
 
     def save(data: dict) -> None:
-        try:
-            payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-            blob_request(
-                "PUT",
-                PREDICTIONS_PATH,
-                payload,
-                "application/json; charset=utf-8",
-            )
-        except Exception:
-            pass
+        payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+        blob_request(
+            "PUT",
+            PREDICTIONS_PATH,
+            payload,
+            "application/json; charset=utf-8",
+        )
 
     return load, save
 

@@ -500,7 +500,7 @@ def main() -> int:
         any(item["source_draw"] == "No. 249983" for item in filtered_payload["predictions"]),
     )
     check(
-        "las rondas evaluadas se recalculan desde los registros",
+        "las rondas evaluadas se cuentan desde los registros guardados",
         filtered_payload["prediction_stats"]["rounds"] == len(filtered_resolved),
         f"{filtered_payload['prediction_stats']['rounds']} vs {len(filtered_resolved)}",
     )
@@ -532,6 +532,67 @@ def main() -> int:
     check(
         "no se guarda un estado vacío sobre datos existentes",
         len(guard_loader().get("predictions", [])) == 1,
+    )
+
+    shrink_loader, shrink_saver = memory_store()
+    first_record = dict(stale_store["predictions"][0])
+    second_record = dict(first_record, source_number=249982, source_draw="No. 249982")
+    shrink_saver(
+        {
+            "version": 3,
+            "updated_at": None,
+            "stats": {},
+            "predictions": [first_record, second_record],
+            "pauses": [],
+        }
+    )
+    shrink = LiveMonitor(
+        shrink_loader,
+        shrink_saver,
+        spec=StrategySpec(),
+        payout=EXPRESS_19,
+        kelly_config=KellyConfig(),
+        bankroll=1000.0,
+        backfill_rounds=0,
+        max_records=0,
+    )
+    shrink._load()
+    shrink._state.predictions = shrink._state.predictions[:1]
+    shrink._state.dirty = True
+    shrink._persist(shrink._state)
+    check(
+        "no se guarda una lista más corta sobre datos existentes",
+        len(shrink_loader().get("predictions", [])) == 2,
+        f"n={len(shrink_loader().get('predictions', []))}",
+    )
+
+    failed_saves = []
+
+    def failing_loader() -> dict:
+        raise RuntimeError("fallo temporal de lectura")
+
+    def failing_saver(data: dict) -> None:
+        failed_saves.append(data)
+
+    failed_monitor = LiveMonitor(
+        failing_loader,
+        failing_saver,
+        spec=StrategySpec(),
+        payout=EXPRESS_19,
+        kelly_config=KellyConfig(),
+        bankroll=1000.0,
+        backfill_rounds=0,
+        max_records=0,
+    )
+    try:
+        failed_monitor.update(rows)
+        load_failed = False
+    except RuntimeError:
+        load_failed = True
+    check(
+        "un fallo de lectura no sobrescribe el registro",
+        load_failed and not failed_saves,
+        f"raises={load_failed} saves={len(failed_saves)}",
     )
 
     stored_live = loader()
@@ -618,9 +679,11 @@ def main() -> int:
     )
     legacy_payload = legacy_monitor.update(rows)
     check(
-        "el registro heredado se descarta y se recalcula",
-        legacy_payload["alert_stats"]["rounds"] > 0
-        and all(item.get("alert_fired") is not None for item in legacy_payload["predictions"]),
+        "el registro heredado sin matriz se conserva",
+        any(
+            item.get("source_draw") == "No. 1001"
+            for item in legacy_payload["predictions"]
+        ),
     )
 
     print()

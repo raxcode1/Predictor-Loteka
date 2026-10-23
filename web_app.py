@@ -73,6 +73,7 @@ class DashboardState:
                 "sync_error": self.sync_error,
                 "recovery": self.recovery,
                 "recovery_error": self.recovery_error,
+                "predictions_error": self.monitor_error,
                 "refresh_interval_seconds": SYNC_INTERVAL,
                 "horario": horario_loteka.estado(),
             }

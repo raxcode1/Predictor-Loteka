@@ -208,6 +208,7 @@ class Estado:
                 "sync_error": self.push_error,
                 "recovery": self.recovery,
                 "recovery_error": self.recovery_error,
+                "predictions_error": self.monitor_error,
                 "refresh_interval_seconds": REFRESH_SECONDS,
             }
             payload.update(self.monitor.payload())
