@@ -451,38 +451,23 @@ class LiveMonitor:
             return
         # Protección contra borrados accidentales: si el almacén tenía
         # predicciones, no se guarda un estado vacío ni una lista más corta.
+        total = len(state.predictions)
         if self._loaded_predictions and not state.predictions:
             state.dirty = False
             return
-        if (
-            self._loaded_predictions
-            and len(state.predictions) < self._loaded_predictions
-        ):
-            state.predictions = state.predictions[:0]
-            state.predictions = list(self._state.predictions)
-            if len(state.predictions) >= self._loaded_predictions:
-                state.predictions = state.predictions[:self._loaded_predictions]
-            else:
-                state.dirty = False
-                return
+        if self._loaded_predictions and total < self._loaded_predictions:
+            state.dirty = False
+            return
+        if self._last_saved_count > 0 and total < self._last_saved_count:
             state.dirty = False
             return
 
-        total = len(state.predictions)
         resolved = sum(
             1
             for record in state.predictions
             if record.get("status") in (STATUS_ACIERTO, STATUS_FALLO, STATUS_OMITIDA)
         )
         pauses = len(state.pauses)
-
-        should_save = True
-        if self._last_saved_count > 0 and total < self._last_saved_count:
-            state.dirty = False
-            return
-        if self._loaded_predictions and total < self._loaded_predictions:
-            state.dirty = False
-            return
 
         payload = {
             "version": STORE_VERSION,
@@ -500,7 +485,6 @@ class LiveMonitor:
         self._last_saved_resolved = resolved
         self._last_saved_pauses = pauses
         state.dirty = False
-
     # ------------------------------------------------------------------
     # Motor de alertas
     # ------------------------------------------------------------------
@@ -741,7 +725,7 @@ class LiveMonitor:
             # Las predicciones pendientes se conservan tal como se guardaron.
             self._trim(state)
 
-        if state.dirty and self._loaded_predictions and len(state.predictions) < self._loaded_predictions:
+        if self._loaded_predictions and len(state.predictions) < self._loaded_predictions:
             state.dirty = False
         self._persist(state)
         return self.payload()
