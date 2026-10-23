@@ -42,9 +42,9 @@ from state_recovery import build_recovery_rankings, select_markov_model
 
 STORE_VERSION = 3
 
-#: Primer sorteo con predicciones reales guardadas. Los registros anteriores
-#: se descartan porque son retroanálisis, no datos tomados en vivo.
-PREDICTIONS_START_DRAW = 249984
+#: Sin corte por sorteo: nunca se eliminan predicciones ya guardadas.
+#: Los registros nuevos se abren en vivo y se conservan tal como se tomaron.
+PREDICTIONS_START_DRAW = 0
 
 STATUS_PENDIENTE = "pendiente"
 STATUS_ACIERTO = "acierto"
@@ -381,7 +381,7 @@ class LiveMonitor:
         payout: PayoutModel | None = None,
         kelly_config: KellyConfig | None = None,
         bankroll: float = 1000.0,
-        backfill_rounds: int = 300,
+        backfill_rounds: int = 0,
         max_records: int = 0,
     ) -> None:
         self.load_store = load_store
@@ -394,6 +394,7 @@ class LiveMonitor:
         self.max_records = max(0, int(max_records))
         self._state = _State()
         self._loaded = False
+        self._loaded_predictions = 0
 
     # ------------------------------------------------------------------
     # Almacén
@@ -401,7 +402,9 @@ class LiveMonitor:
     def _load(self) -> _State:
         if not self._loaded:
             stored = self.load_store() or {}
-            predictions, dropped = _migrate_records(list(stored.get("predictions") or []))
+            raw_predictions = list(stored.get("predictions") or [])
+            self._loaded_predictions = len(raw_predictions)
+            predictions, dropped = _migrate_records(raw_predictions)
             eligible = []
             for record in predictions:
                 try:
@@ -431,6 +434,10 @@ class LiveMonitor:
 
     def _persist(self, state: _State) -> None:
         if not state.dirty:
+            return
+        # Protección contra borrados accidentales: si el almacén tenía
+        # predicciones, no se guarda un estado vacío.
+        if self._loaded_predictions and not state.predictions:
             return
         payload = {
             "version": STORE_VERSION,
@@ -574,6 +581,7 @@ class LiveMonitor:
             "heuristic_rank": None,
             "matched": "pendiente",
             "alert_hit": None,
+            "origin": "backfill",
         }
         return record
 
@@ -675,7 +683,7 @@ class LiveMonitor:
                 self._open(state, draws, engine, forecasts)
                 self._reopen_omitted(state, draws, engine)
                 self._prune_pauses(state, draws)
-            self._refresh_pending(state, engine)
+            # Las predicciones pendientes se conservan tal como se guardaron.
             self._trim(state)
 
         self._persist(state)
@@ -774,6 +782,7 @@ class LiveMonitor:
                 self._register_pause(state, previous + 1, number - 1)
 
         record = self._build_record(label, number, forecasts[-1])
+        record["origin"] = "live"
         record["decision"] = self._evaluate(engine, record)
         state.predictions.append(record)
         state.dirty = True
@@ -822,17 +831,6 @@ class LiveMonitor:
             state.pauses = kept
             state.stats["pauses"] = len(kept)
             state.dirty = True
-
-    def _refresh_pending(self, state: _State, engine: AlertEngine) -> None:
-        """Recalcula la decisión de la ronda pendiente con la evidencia actual."""
-        for record in reversed(state.predictions):
-            if record.get("status") != STATUS_PENDIENTE:
-                continue
-            decision = self._evaluate(engine, record)
-            if decision != record.get("decision"):
-                record["decision"] = decision
-                state.dirty = True
-            return
 
     def _trim(self, state: _State) -> None:
         """Conserva todas las rondas cuando max_records es 0."""

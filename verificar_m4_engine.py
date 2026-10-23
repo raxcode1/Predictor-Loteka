@@ -449,6 +449,7 @@ def main() -> int:
         "sin backfill sólo se guarda la ronda tomada en vivo",
         len(fresh_payload["predictions"]) == 1
         and fresh_payload["predictions"][0]["status"] == "pendiente"
+        and fresh._state.predictions[0].get("origin") == "live"
         and fresh_payload["prediction_stats"]["rounds"] == 0,
         f"n={len(fresh_payload['predictions'])}",
     )
@@ -464,8 +465,8 @@ def main() -> int:
     fake = dict(stale_store["predictions"][0])
     fake.update(
         {
-            "source_number": PREDICTIONS_START_DRAW - 1,
-            "source_draw": f"No. {PREDICTIONS_START_DRAW - 1}",
+            "source_number": 249983,
+            "source_draw": "No. 249983",
             "status": "fallo",
             "actual_number": 0,
             "markov_rank": None,
@@ -495,16 +496,42 @@ def main() -> int:
         if item["status"] in ("acierto", "fallo")
     ]
     check(
-        "se descartan las predicciones anteriores al corte real",
-        all(
-            int(item["source_draw"].split()[-1]) >= PREDICTIONS_START_DRAW
-            for item in filtered_payload["predictions"]
-        ),
+        "las predicciones guardadas no se eliminan",
+        any(item["source_draw"] == "No. 249983" for item in filtered_payload["predictions"]),
     )
     check(
         "las rondas evaluadas se recalculan desde los registros",
         filtered_payload["prediction_stats"]["rounds"] == len(filtered_resolved),
         f"{filtered_payload['prediction_stats']['rounds']} vs {len(filtered_resolved)}",
+    )
+
+    guard_loader, guard_saver = memory_store()
+    guard_saver(
+        {
+            "version": 3,
+            "updated_at": None,
+            "stats": {},
+            "predictions": [dict(stale_store["predictions"][0])],
+            "pauses": [],
+        }
+    )
+    guarded = LiveMonitor(
+        guard_loader,
+        guard_saver,
+        spec=StrategySpec(),
+        payout=EXPRESS_19,
+        kelly_config=KellyConfig(),
+        bankroll=1000.0,
+        backfill_rounds=0,
+        max_records=0,
+    )
+    guarded._load()
+    guarded._state.predictions = []
+    guarded._state.dirty = True
+    guarded._persist(guarded._state)
+    check(
+        "no se guarda un estado vacío sobre datos existentes",
+        len(guard_loader().get("predictions", [])) == 1,
     )
 
     stored_live = loader()

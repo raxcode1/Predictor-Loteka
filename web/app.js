@@ -236,8 +236,8 @@ function renderPredictions(data) {
   const stats = data.prediction_stats || {};
   const since = stats.start_draw ? ` desde No. ${stats.start_draw}` : "";
   document.querySelector("#predictions-summary").textContent = stats.rounds
-    ? `${stats.rounds} rondas evaluadas${since} · Markov top-1 ${percent(stats.markov_top1_rate)} (base ${percent(stats.baseline)}) · Markov top-5 ${percent(stats.markov_rate)} (base ${percent(stats.baseline_top5)}) · Heurístico top-1 ${percent(stats.heuristic_top1_rate)}`
-    : "Aún no hay rondas evaluadas.";
+    ? `${stats.rounds} rondas evaluadas guardadas${since} · Markov top-1 ${percent(stats.markov_top1_rate)} (base ${percent(stats.baseline)}) · Markov top-5 ${percent(stats.markov_rate)} (base ${percent(stats.baseline_top5)}) · Heurístico top-1 ${percent(stats.heuristic_top1_rate)}`
+    : "Aún no hay rondas reales guardadas. La próxima ronda se guardará en vivo.";
 
 }
 
