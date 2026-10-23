@@ -410,6 +410,9 @@ class LiveMonitor:
         self._state = _State()
         self._loaded = False
         self._loaded_predictions = 0
+        self._last_saved_count = 0
+        self._last_saved_resolved = 0
+        self._last_saved_pauses = 0
 
     # ------------------------------------------------------------------
     # Almacén
@@ -431,6 +434,13 @@ class LiveMonitor:
                 stats=stats,
                 dirty=bool(dropped) or stats != stored_stats,
             )
+            self._last_saved_count = len(predictions)
+            self._last_saved_resolved = sum(
+                1
+                for record in predictions
+                if record.get("status") in (STATUS_ACIERTO, STATUS_FALLO, STATUS_OMITIDA)
+            )
+            self._last_saved_pauses = len(pauses)
             # Nunca se reemplaza un registro existente por uno reconstruido.
             # Solo se siembra desde el CSV cuando todavía no hay predicciones.
             self._loaded = True
@@ -449,6 +459,29 @@ class LiveMonitor:
             and len(state.predictions) < self._loaded_predictions
         ):
             return
+
+        total = len(state.predictions)
+        resolved = sum(
+            1
+            for record in state.predictions
+            if record.get("status") in (STATUS_ACIERTO, STATUS_FALLO, STATUS_OMITIDA)
+        )
+        pauses = len(state.pauses)
+
+        should_save = False
+        if self._last_saved_count == 0 and total > 0:
+            should_save = True
+        elif total != self._last_saved_count:
+            should_save = True
+        elif resolved != self._last_saved_resolved:
+            should_save = True
+        elif pauses != self._last_saved_pauses:
+            should_save = True
+
+        if not should_save:
+            state.dirty = False
+            return
+
         payload = {
             "version": STORE_VERSION,
             "updated_at": _now(),
@@ -461,6 +494,9 @@ class LiveMonitor:
         except Exception:
             return
         self._loaded_predictions = len(state.predictions)
+        self._last_saved_count = total
+        self._last_saved_resolved = resolved
+        self._last_saved_pauses = pauses
         state.dirty = False
 
     # ------------------------------------------------------------------
