@@ -88,7 +88,10 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
     candidates = []
     # Probar con bucket tal cual sin codificar primero (algunos proyectos lo requieren)
     # Probar primero formato más común con service role key
-    candidates.append(f"{base}/storage/v1/object/{bucket}/{clean.replace(' ', '%20')}")
+    # Usar URL encode minimal
+    import urllib.parse as up
+    path_enc = up.quote(clean)
+    candidates.append(f"{base}/storage/v1/object/{bucket}/{path_enc}")
     last_error = None
     for url in candidates:
         headers = {
