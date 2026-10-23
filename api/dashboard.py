@@ -83,32 +83,46 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
         raise RuntimeError("Falta SUPABASE_BUCKET.")
     from urllib.parse import quote
     clean = pathname.strip().lstrip("/")
-    # Intentar primero con path exacto sin slash duplicado
-    bucket_enc = quote(SUPABASE_BUCKET, safe='')
-    path_enc = quote(clean, safe='')
-    url = f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/{bucket_enc}/{path_enc}"
-    headers = {
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "apikey": SUPABASE_KEY,
-        "Content-Type": content_type,
-        "User-Agent": "ruleta-express-vercel",
-    }
-    upload_method = method
-    if method == "PUT":
-        headers["x-upsert"] = "true"
-        headers["cache-control"] = "no-cache"
-    request = Request(url, data=body, method=upload_method, headers=headers)
-    try:
-        with urlopen(request, timeout=60) as response:
-            return response.read()
-    except HTTPError as error:
+    base = SUPABASE_URL.rstrip("/")
+    bucket = SUPABASE_BUCKET
+    candidates = []
+    candidates.append(f"{base}/storage/v1/object/{quote(bucket)}/{quote(clean)}")
+    candidates.append(f"{base}/storage/v1/object/{bucket}/{quote(clean)}")
+    candidates.append(f"{base}/storage/v1/object/{quote(bucket, safe='')}/{quote(clean, safe='')}")
+    candidates.append(f"{base}/storage/v1/object/public/{quote(bucket)}/{quote(clean)}")
+    candidates.append(f"{base}/storage/v1/object/public/{bucket}/{quote(clean)}")
+    candidates.append(f"{base}/storage/v1/s3/object/{quote(bucket)}/{quote(clean)}")
+    last_error = None
+    for url in candidates:
+        headers = {
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "apikey": SUPABASE_KEY,
+            "Content-Type": content_type,
+            "User-Agent": "ruleta-express-vercel",
+        }
+        upload_method = method
+        if method == "PUT":
+            headers["x-upsert"] = "true"
+            headers["cache-control"] = "no-cache"
+        request = Request(url, data=body, method=upload_method, headers=headers)
         try:
-            detail = error.read().decode("utf-8", errors="replace")
-        except Exception:
-            detail = ""
-        raise RuntimeError(f"Supabase Storage {method} {pathname} -> HTTP {error.code}: {detail[:500]}") from error
-    except Exception as error:
-        raise RuntimeError(f"Supabase Storage {method} {pathname} -> {error}") from error
+            with urlopen(request, timeout=60) as response:
+                return response.read()
+        except HTTPError as error:
+            try:
+                detail = error.read().decode("utf-8", errors="replace")
+            except Exception:
+                detail = ""
+            last_error = RuntimeError(f"Supabase Storage {method} {pathname} -> HTTP {error.code}: {detail[:500]}")
+            if "PGRST125" in detail or error.code in (400, 404):
+                continue
+            raise last_error
+        except Exception as error:
+            last_error = RuntimeError(f"Supabase Storage {method} {pathname} -> {error}")
+            continue
+    if last_error:
+        raise last_error
+    raise RuntimeError("Supabase Storage: sin candidatos válidos")
 
 
 def blob_request(
