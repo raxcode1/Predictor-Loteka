@@ -87,11 +87,11 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
     bucket = SUPABASE_BUCKET
     candidates = []
     # Probar con bucket tal cual sin codificar primero (algunos proyectos lo requieren)
+    # Intentar con rutas que funcionan con service role
+    candidates.append(f"{base}/storage/v1/object/{bucket}/{clean}")
+    candidates.append(f"{base}/storage/v1/object/{quote(bucket)}/{clean}")
     candidates.append(f"{base}/storage/v1/object/{bucket}/{quote(clean)}")
     candidates.append(f"{base}/storage/v1/object/public/{bucket}/{quote(clean)}")
-    candidates.append(f"{base}/storage/v1/object/{quote(bucket)}/{quote(clean)}")
-    candidates.append(f"{base}/storage/v1/object/{quote(bucket, safe='')}/{quote(clean, safe='')}")
-    candidates.append(f"{base}/storage/v1/bucket/{bucket}/object/{quote(clean)}")
     last_error = None
     for url in candidates:
         headers = {
