@@ -46,6 +46,7 @@ EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 _cached_draw: str | None = None
 _cached_recovery: dict | None = None
 _monitor: LiveMonitor | None = None
+_last_csv_hash: str | None = None
 
 
 def blob_request(
@@ -233,14 +234,19 @@ def dashboard() -> dict:
     if horario["abierto"]:
         try:
             current = merge_results(rows, extract_results(fetch_page()))
-            if BLOB_TOKEN and len(current) >= len(rows) and serialize_rows(current) != serialize_rows(rows):
+            if BLOB_TOKEN and len(current) > len(rows):
                 try:
-                    blob_request(
-                        "PUT",
-                        BLOB_PATH,
-                        serialize_rows(current),
-                        "text/csv; charset=utf-8",
-                    )
+                    global _last_csv_hash
+                    payload_csv = serialize_rows(current)
+                    current_hash = str(hash(payload_csv))
+                    if current_hash != _last_csv_hash:
+                        blob_request(
+                            "PUT",
+                            BLOB_PATH,
+                            payload_csv,
+                            "text/csv; charset=utf-8",
+                        )
+                        _last_csv_hash = current_hash
                 except Exception:
                     pass
             rows = current
