@@ -54,6 +54,9 @@ td:last-child { color: var(--accent); font-size: 1.1rem; }
 .failures li { border-left: 2px solid #7d4248; margin-bottom: 6px; padding-left: 9px; }
 .hit { color: var(--green); }
 .miss { color: var(--red); }
+.ev-yes { color: var(--green); font-weight: 700; }
+.ev-no { color: var(--muted); }
+#ev-summary { margin-top: 6px; }
 table.compact td:last-child { color: inherit; font-size: 1rem; }
 .hidden { display: none; }
 .disclaimer { color: var(--muted); font-size: .8rem; margin-top: 16px; text-align: center; }

@@ -156,6 +156,13 @@ function renderAlert(data) {
     .join("");
 }
 
+function evBadge(prediction) {
+  const title = (prediction.ev_reasons || []).join(" + ") || "Sin señal EV";
+  const label = prediction.ev_valid ? "Sí" : "No";
+  const className = prediction.ev_valid ? "ev-yes" : "ev-no";
+  return `<span class="${className}" title="${title}">${label}</span>`;
+}
+
 function renderPredictions(data) {
   const errorBox = document.querySelector("#predictions-error");
   errorBox.textContent = data.predictions_error || "";
@@ -193,6 +200,7 @@ function renderPredictions(data) {
         <td>${heuristic}</td>
         <td>${matched}</td>
         <td>${alert}</td>
+        <td>${evBadge(prediction)}</td>
       </tr>`;
     })
     .join("");
@@ -228,6 +236,7 @@ function renderPredictions(data) {
           <td>${n(h[2])}</td><td>${p(h[2])}</td>
           <td>${n(h[3])}</td><td>${p(h[3])}</td>
           <td>${n(h[4])}</td><td>${p(h[4])}</td>
+          <td>${evBadge(prediction)}</td>
         </tr>`;
       })
       .join("");
@@ -237,6 +246,15 @@ function renderPredictions(data) {
   document.querySelector("#predictions-summary").textContent = stats.rounds
     ? `${stats.rounds} rondas evaluadas · Markov top-1 ${percent(stats.markov_top1_rate)} (base ${percent(stats.baseline)}) · Markov top-5 ${percent(stats.markov_rate)} (base ${percent(stats.baseline_top5)}) · Heurístico top-1 ${percent(stats.heuristic_top1_rate)}`
     : "Aún no hay rondas evaluadas.";
+
+  const predictions = data.predictions || [];
+  const viable = predictions.filter((prediction) => prediction.ev_valid).length;
+  const pending = predictions.find((prediction) => prediction.status === "pendiente");
+  const current = pending
+    ? ` Ronda pendiente ${pending.source_draw}: ${pending.ev_valid ? "VIABLE" : "NO VIABLE"}.`
+    : "";
+  document.querySelector("#ev-summary").textContent =
+    `Filtro EV: ${viable} de ${predictions.length} jugadas viables.${current}`;
 }
 
 function renderPauses(pauses) {

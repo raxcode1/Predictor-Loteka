@@ -22,6 +22,7 @@ from config_sync import INTERVALO_SINCRONIZACION
 from live_monitor import LiveMonitor, memory_store
 from m4_engine.kelly import KellyConfig
 from sync_ruleta_express import extract_results, fetch_page
+from validar_predicciones import evaluate_record
 
 
 # Configurar URL usando Worker si está disponible
@@ -237,13 +238,17 @@ def dashboard() -> dict:
             monitor_error = str(e)
             monitor_payload = {}
 
+    predictions = monitor_payload.get("predictions", [])
+    for prediction in predictions:
+        prediction.update(evaluate_record(prediction))
+
     return {
         "results": rows,
         "last_sync": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "sync_error": error,
         "recovery": recovery,
         "recovery_error": recovery_error,
-        "predictions": monitor_payload.get("predictions", []),
+        "predictions": predictions,
         "pauses": monitor_payload.get("pauses", []),
         "predictions_error": monitor_error,
         "alert": monitor_payload.get("alert"),

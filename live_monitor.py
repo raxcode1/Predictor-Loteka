@@ -933,6 +933,7 @@ class LiveMonitor:
 
         return {
             "source_draw": record.get("source_draw"),
+            "last_number": record.get("last_number"),
             "created_at": record.get("created_at"),
             "status": record.get("status"),
             "observed_draw": record.get("observed_draw"),
