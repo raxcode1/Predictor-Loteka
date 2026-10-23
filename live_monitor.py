@@ -42,9 +42,10 @@ from state_recovery import build_recovery_rankings, select_markov_model
 
 STORE_VERSION = 3
 
-#: Las predicciones anteriores a este sorteo usaron datos incompletos y se
-#: descartan; el registro se reconstruye desde este número en adelante.
-PREDICTIONS_START_DRAW = 249853
+#: Sorteo mínimo que se conserva en el registro. Se mantiene en 0 para no
+#: borrar predicciones reales ya almacenadas; las rondas nuevas se siguen
+#: abriendo en vivo, sin reconstruir el historial.
+PREDICTIONS_START_DRAW = 0
 
 STATUS_PENDIENTE = "pendiente"
 STATUS_ACIERTO = "acierto"
@@ -190,6 +191,25 @@ def _normalize_stats(raw: Any) -> dict[str, int]:
     return stats
 
 
+def _ranking_entries(raw: Any) -> list[dict]:
+    """Convierte un ranking guardado en la lista que usa el dashboard."""
+    entries = []
+    for item in list(raw or [])[:5]:
+        if isinstance(item, dict):
+            number = item.get("number")
+            probability = item.get("probability", 0.0)
+        else:
+            try:
+                number, probability = item[0], item[1]
+            except (TypeError, IndexError, KeyError):
+                continue
+        try:
+            entries.append({"number": int(number), "probability": float(probability)})
+        except (TypeError, ValueError):
+            continue
+    return entries
+
+
 def _rebuild_forecasts_from_lists(record: dict) -> None:
     """Rellena m1-p5/h1-ph5 desde markov/heuristic si faltan."""
     numbers = dict((record.get("matrix") or {}).get("numbers") or {})
@@ -199,27 +219,17 @@ def _rebuild_forecasts_from_lists(record: dict) -> None:
 
     markov_forecast = list(record.get("markov_forecast") or [])
     if (not markov_forecast or any(m.get("number") is None for m in markov_forecast)):
-        rebuilt = []
-        for name in ["M1", "M2", "M3", "M4", "M5"]:
-            n = numbers.get(name)
-            if n is None:
-                continue
-            p = probs.get(name)
-            try:
-                rebuilt.append({"number": int(n), "probability": float(p) if p is not None else 0.0})
-            except Exception:
-                continue
-        if rebuilt:
-            markov_forecast = rebuilt
-    if not markov_forecast:
-        markov_list = list(record.get("markov") or [])
-        rebuilt = []
-        for n, _ in markov_list[:5]:
-            try:
-                p = probs.get(str(n), probs.get(n, 0.0))
-                rebuilt.append({"number": int(n), "probability": float(p)})
-            except Exception:
-                continue
+        rebuilt = _ranking_entries(record.get("markov"))
+        if not rebuilt:
+            for name in ["M1", "M2", "M3", "M4", "M5"]:
+                n = numbers.get(name)
+                if n is None:
+                    continue
+                p = probs.get(name)
+                try:
+                    rebuilt.append({"number": int(n), "probability": float(p) if p is not None else 0.0})
+                except Exception:
+                    continue
         if rebuilt:
             markov_forecast = rebuilt
     if markov_forecast:
@@ -227,27 +237,17 @@ def _rebuild_forecasts_from_lists(record: dict) -> None:
 
     heuristic_forecast = list(record.get("heuristic_forecast") or [])
     if (not heuristic_forecast or any(h.get("number") is None for h in heuristic_forecast)):
-        rebuilt = []
-        for name in ["H1", "H2", "H3", "H4", "H5"]:
-            n = numbers.get(name)
-            if n is None:
-                continue
-            p = probs.get(name)
-            try:
-                rebuilt.append({"number": int(n), "probability": float(p) if p is not None else 0.0})
-            except Exception:
-                continue
-        if rebuilt:
-            heuristic_forecast = rebuilt
-    if not heuristic_forecast:
-        heuristic_list = list(record.get("heuristic") or [])
-        rebuilt = []
-        for n, _ in heuristic_list[:5]:
-            try:
-                p = probs.get(str(n), probs.get(n, 0.0))
-                rebuilt.append({"number": int(n), "probability": float(p)})
-            except Exception:
-                continue
+        rebuilt = _ranking_entries(record.get("heuristic"))
+        if not rebuilt:
+            for name in ["H1", "H2", "H3", "H4", "H5"]:
+                n = numbers.get(name)
+                if n is None:
+                    continue
+                p = probs.get(name)
+                try:
+                    rebuilt.append({"number": int(n), "probability": float(p) if p is not None else 0.0})
+                except Exception:
+                    continue
         if rebuilt:
             heuristic_forecast = rebuilt
     if heuristic_forecast:
@@ -345,7 +345,6 @@ class LiveMonitor:
         self.max_records = max(10, int(max_records))
         self._state = _State()
         self._loaded = False
-        self._migrated = False
 
     # ------------------------------------------------------------------
     # Almacén
@@ -362,20 +361,18 @@ class LiveMonitor:
                     dropped += 1
                     continue
                 if number >= PREDICTIONS_START_DRAW:
+                    _rebuild_forecasts_from_lists(record)
                     eligible.append(record)
                 else:
                     dropped += 1
             predictions = eligible
-            try:
-                stored_version = int(stored.get("version", 0))
-            except (TypeError, ValueError):
-                stored_version = 0
             self._state = _State(
                 predictions=predictions,
                 pauses=list(stored.get("pauses") or []),
                 stats=_normalize_stats(stored.get("stats")),
             )
-            self._migrated = dropped > 0 or stored_version < STORE_VERSION
+            # Nunca se reemplaza un registro existente por uno reconstruido.
+            # Sólo se siembra desde el CSV cuando todavía no hay predicciones.
             self._loaded = True
         return self._state
 
@@ -613,14 +610,14 @@ class LiveMonitor:
                 for forecast, ranking in zip(forecasts, rankings):
                     forecast.markov = ranking["markov"]
                     forecast.heuristic = ranking["heuristic"]
-            if not state.predictions or self._migrated:
-                state.predictions = []
+            if not state.predictions:
                 state.stats = _empty_stats()
-                self._migrated = False
                 self._backfill(state, draws, engine, forecasts)
             else:
                 self._resolve(state, draws, engine)
                 self._open(state, draws, engine, forecasts)
+                self._reopen_omitted(state, draws, engine)
+                self._prune_pauses(state, draws)
             self._refresh_pending(state, engine)
             self._trim(state)
 
@@ -723,6 +720,51 @@ class LiveMonitor:
         record["decision"] = self._evaluate(engine, record)
         state.predictions.append(record)
         state.dirty = True
+
+    def _reopen_omitted(
+        self,
+        state: _State,
+        draws: list[tuple[int, str, int]],
+        engine: AlertEngine,
+    ) -> None:
+        """Cierra rondas que quedaron «no evaluadas» por un hueco ya reparado."""
+        by_number = {number: (label, value) for number, label, value in draws}
+        reopened = False
+        for record in state.predictions:
+            if record.get("status") != STATUS_OMITIDA:
+                continue
+            try:
+                source = int(record["source_number"])
+            except (TypeError, ValueError):
+                continue
+            following = by_number.get(source + 1)
+            if following is None:
+                continue
+            label, value = following
+            _rebuild_forecasts_from_lists(record)
+            self._close(engine, record, label, value, state)
+            reopened = True
+        if reopened:
+            state.dirty = True
+
+    def _prune_pauses(self, state: _State, draws: list[tuple[int, str, int]]) -> None:
+        """Elimina pausas cuyos sorteos ya fueron recuperados del origen."""
+        present = {number for number, _, _ in draws}
+        kept = []
+        for pause in state.pauses:
+            try:
+                start = draw_number(pause.get("from_draw", ""))
+                end = draw_number(pause.get("to_draw", ""))
+            except (TypeError, ValueError):
+                kept.append(pause)
+                continue
+            if start > end or all(number in present for number in range(start, end + 1)):
+                continue
+            kept.append(pause)
+        if len(kept) != len(state.pauses):
+            state.pauses = kept
+            state.stats["pauses"] = len(kept)
+            state.dirty = True
 
     def _refresh_pending(self, state: _State, engine: AlertEngine) -> None:
         """Recalcula la decisión de la ronda pendiente con la evidencia actual."""

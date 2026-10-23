@@ -175,15 +175,15 @@ def backfill_missing_draws(frame: pd.DataFrame, fresh_rows: list[dict[str, str]]
             days=BACKFILL_RECENT_DAYS
         ):
             continue
-        start, end = (hi_date, lo_date) if hi_date <= lo_date else (lo_date, hi_date)
-        if start == end:
-            query_days.add(start)
-        elif hi_date < lo_date:
-            query_days.update(start + timedelta(days=i) for i in range((end-start).days + 1))
-        else:
-            # El cambio de jornada produce saltos numéricos no necesariamente
-            # consecutivos; consultar la fecha del ID alto y su día vecino.
-            query_days.update((hi_date, hi_date + timedelta(days=1)))
+        start, end = sorted((hi_date, lo_date))
+        # Un hueco puede cruzar la medianoche (por ejemplo, el PC estuvo
+        # apagado desde la tarde hasta la madrugada siguiente). Hay que
+        # consultar todos los días entre ambas fechas; limitarse a la fecha
+        # del ID alto deja sin recuperar los sorteos publicados el día
+        # anterior, que es justo donde suele estar el tramo perdido.
+        query_days.update(
+            start + timedelta(days=i) for i in range((end - start).days + 1)
+        )
 
     recovered = {}
     for day in sorted(query_days):

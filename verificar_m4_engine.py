@@ -397,6 +397,42 @@ def main() -> int:
         f"{len(reloaded_payload['predictions'])} vs {len(live_predictions)}",
     )
 
+    stored_live = loader()
+    legacy_store = dict(stored_live)
+    legacy_store["version"] = 1
+    legacy_store["predictions"] = [
+        dict(record, preserved=True)
+        for record in stored_live.get("predictions", [])
+    ]
+    preserved_loader, preserved_saver = memory_store()
+    preserved_saver(legacy_store)
+    preserved_monitor = LiveMonitor(
+        preserved_loader,
+        preserved_saver,
+        spec=StrategySpec(),
+        payout=EXPRESS_19,
+        kelly_config=KellyConfig(),
+        bankroll=1000.0,
+        backfill_rounds=40,
+        max_records=100,
+    )
+    preserved_monitor.update(rows)
+    expected_sources = {
+        int(record["source_number"]) for record in legacy_store["predictions"]
+    }
+    preserved_sources = {
+        int(record["source_number"]): record
+        for record in preserved_monitor._state.predictions
+    }
+    check(
+        "las predicciones reales se conservan entre versiones",
+        bool(expected_sources)
+        and all(
+            preserved_sources.get(number, {}).get("preserved")
+            for number in expected_sources
+        ),
+    )
+
     short_engine = LiveModelEngine()
     for value in values[:20]:
         short_engine.advance(value)
