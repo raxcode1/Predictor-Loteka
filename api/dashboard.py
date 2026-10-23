@@ -88,8 +88,7 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
     candidates = []
     # Probar con bucket tal cual sin codificar primero (algunos proyectos lo requieren)
     # Probar primero formato más común con service role key
-    candidates.append(f"{base}/storage/v1/object/{quote(bucket)}/{quote(clean, safe='')}")
-    candidates.append(f"{base}/storage/v1/object/{bucket}/{quote(clean, safe='')}")
+    candidates.append(f"{base}/storage/v1/object/{bucket}/{clean.replace(' ', '%20')}")
     last_error = None
     for url in candidates:
         headers = {
