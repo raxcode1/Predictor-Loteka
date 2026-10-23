@@ -36,9 +36,27 @@ PREDICTIONS_PATH = "ruleta_predictions.json"
 LOCAL_CSV = Path(__file__).resolve().parents[1] / "Resultados_RuletaExpress.csv"
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-SUPABASE_BUCKET = os.environ.get("SUPABASE_BUCKET", "ruleta-data").strip()
+# Compatibilidad con nombres alternativos
+SUPABASE_URL = (
+    os.environ.get("SUPABASE_URL")
+    or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+    or os.environ.get("SUPABASE_PROJECT_URL")
+    or ""
+).strip().rstrip("/")
+SUPABASE_KEY = (
+    os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    or os.environ.get("SUPABASE_SERVICE_KEY")
+    or os.environ.get("SUPABASE_SERVICE_ROLE")
+    or os.environ.get("SUPABASE_ANON_KEY")
+    or os.environ.get("SUPABASE_KEY")
+    or ""
+).strip()
+SUPABASE_BUCKET = (
+    os.environ.get("SUPABASE_BUCKET")
+    or os.environ.get("SUPABASE_STORAGE_BUCKET")
+    or os.environ.get("STORAGE_BUCKET")
+    or "ruleta-data"
+).strip()
 
 
 _cached_draw: str | None = None
@@ -55,20 +73,34 @@ def storage_object_url(pathname: str) -> str:
 
 
 def storage_request(method: str, pathname: str, body: bytes | None = None, content_type: str = "application/json; charset=utf-8") -> bytes:
+    if not SUPABASE_URL:
+        raise RuntimeError("Falta SUPABASE_URL.")
     if not SUPABASE_KEY:
         raise RuntimeError("Falta SUPABASE_SERVICE_ROLE_KEY.")
+    if not SUPABASE_BUCKET:
+        raise RuntimeError("Falta SUPABASE_BUCKET.")
     url = storage_object_url(pathname)
     headers = {
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "apikey": SUPABASE_KEY,
         "Content-Type": content_type,
+        "User-Agent": "ruleta-express-vercel",
     }
     if method == "PUT":
         headers["x-upsert"] = "true"
         headers["cache-control"] = "no-cache"
     request = Request(url, data=body, method=method, headers=headers)
-    with urlopen(request, timeout=60) as response:
-        return response.read()
+    try:
+        with urlopen(request, timeout=60) as response:
+            return response.read()
+    except HTTPError as error:
+        try:
+            detail = error.read().decode("utf-8", errors="replace")
+        except Exception:
+            detail = ""
+        raise RuntimeError(f"Supabase Storage {method} {pathname} -> HTTP {error.code}: {detail[:500]}") from error
+    except Exception as error:
+        raise RuntimeError(f"Supabase Storage {method} {pathname} -> {error}") from error
 
 
 def blob_request(
@@ -224,8 +256,8 @@ def dashboard() -> dict:
                             "text/csv; charset=utf-8",
                         )
                         _last_csv_hash = current_hash
-                except Exception:
-                    pass
+                except Exception as ex:
+                    error = f"Error guardando CSV en Supabase: {ex}"
             rows = current
         except Exception as exception:
             error = str(exception)
