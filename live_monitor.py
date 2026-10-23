@@ -452,12 +452,19 @@ class LiveMonitor:
         # Protección contra borrados accidentales: si el almacén tenía
         # predicciones, no se guarda un estado vacío ni una lista más corta.
         if self._loaded_predictions and not state.predictions:
+            state.dirty = False
             return
         if (
-            self.max_records <= 0
-            and self._loaded_predictions
+            self._loaded_predictions
             and len(state.predictions) < self._loaded_predictions
         ):
+            state.predictions = state.predictions[:0]
+            state.predictions = list(self._state.predictions)
+            if len(state.predictions) >= self._loaded_predictions:
+                state.predictions = state.predictions[:self._loaded_predictions]
+            else:
+                state.dirty = False
+                return
             state.dirty = False
             return
 
@@ -469,20 +476,11 @@ class LiveMonitor:
         )
         pauses = len(state.pauses)
 
-        should_save = False
-        if self._last_saved_count == 0 and total > 0:
-            should_save = True
-        elif total > self._last_saved_count:
-            should_save = True
-        elif resolved != self._last_saved_resolved:
-            should_save = True
-        elif pauses != self._last_saved_pauses:
-            should_save = True
-        elif total < self._last_saved_count:
+        should_save = True
+        if self._last_saved_count > 0 and total < self._last_saved_count:
             state.dirty = False
             return
-
-        if not should_save:
+        if self._loaded_predictions and total < self._loaded_predictions:
             state.dirty = False
             return
 

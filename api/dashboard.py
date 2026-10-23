@@ -65,8 +65,9 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
     }
     if method == "PUT":
         headers["x-upsert"] = "true"
+        headers["cache-control"] = "no-cache"
     request = Request(url, data=body, method=method, headers=headers)
-    with urlopen(request, timeout=30) as response:
+    with urlopen(request, timeout=60) as response:
         return response.read()
 
 
@@ -210,12 +211,12 @@ def dashboard() -> dict:
     if horario["abierto"]:
         try:
             current = merge_results(rows, extract_results(fetch_page()))
-            if SUPABASE_URL and SUPABASE_KEY and len(current) > len(rows):
+            if SUPABASE_URL and SUPABASE_KEY and len(current) >= len(rows):
                 try:
                     global _last_csv_hash
                     payload_csv = serialize_rows(current)
                     current_hash = str(hash(payload_csv))
-                    if current_hash != _last_csv_hash:
+                    if current_hash != _last_csv_hash and len(current) > len(rows):
                         blob_request(
                             "PUT",
                             "Resultados_RuletaExpress.csv",
