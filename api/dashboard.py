@@ -37,12 +37,26 @@ LOCAL_CSV = Path(__file__).resolve().parents[1] / "Resultados_RuletaExpress.csv"
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 
 # Compatibilidad con nombres alternativos
-SUPABASE_URL = (
+def _normalizar_url_supabase(valor: str) -> str:
+    """Normaliza la URL del proyecto Supabase a su raíz (https://xyz.supabase.co).
+
+    Si el usuario configuró una URL con sufijos como /rest/v1, /storage/v1 o
+    /pg (endpoint del pooler de base de datos), el Storage API respondería
+    PGRST125 'Invalid path' porque la petición no llegaría a /storage/v1.
+    """
+    url = valor.strip().rstrip("/")
+    for sufijo in ("/rest/v1", "/storage/v1", "/auth/v1", "/realtime/v1", "/pg"):
+        if url.lower().endswith(sufijo):
+            url = url[: -len(sufijo)].rstrip("/")
+    return url
+
+
+SUPABASE_URL = _normalizar_url_supabase(
     os.environ.get("SUPABASE_URL")
     or os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     or os.environ.get("SUPABASE_PROJECT_URL")
     or ""
-).strip().rstrip("/")
+)
 SUPABASE_KEY = (
     os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     or os.environ.get("SUPABASE_SERVICE_KEY")
@@ -113,6 +127,11 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
                 detail = error.read().decode("utf-8", errors="replace")
             except Exception:
                 detail = ""
+            if error.code == 404 and "NoSuchBucket" in detail:
+                raise RuntimeError(
+                    f"El bucket de Supabase '{bucket}' no existe. "
+                    "Créalo en Supabase Studio -> Storage y reintenta."
+                )
             last_error = RuntimeError(f"Supabase Storage {method} {pathname} -> HTTP {error.code}: {detail[:500]}")
             if "PGRST125" in detail or error.code in (400, 404):
                 continue
