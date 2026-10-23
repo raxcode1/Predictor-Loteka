@@ -70,10 +70,8 @@ def storage_object_url(pathname: str) -> str:
         raise RuntimeError("Faltan SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY o SUPABASE_BUCKET.")
     from urllib.parse import quote
     clean = pathname.strip().lstrip("/")
-    # Usar comillas para bucket con nombres especiales y codificar correctamente
-    bucket_enc = quote(SUPABASE_BUCKET)
-    path_enc = quote(clean, safe='')
-    return f"{SUPABASE_URL}/storage/v1/object/{bucket_enc}/{path_enc}"
+    # Algunos deployments de Supabase Storage requieren /public/ o rutas alternativas; probar ruta objeto directa
+    return f"{SUPABASE_URL}/storage/v1/object/{quote(SUPABASE_BUCKET, safe='')} /{quote(clean)}".replace(" /", "/")
 
 
 def storage_request(method: str, pathname: str, body: bytes | None = None, content_type: str = "application/json; charset=utf-8") -> bytes:
@@ -85,7 +83,7 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
         raise RuntimeError("Falta SUPABASE_BUCKET.")
     from urllib.parse import quote
     clean = pathname.strip().lstrip("/")
-    bucket_enc = quote(SUPABASE_BUCKET)
+    bucket_enc = quote(SUPABASE_BUCKET, safe='')
     path_enc = quote(clean)
     url = f"{SUPABASE_URL}/storage/v1/object/{bucket_enc}/{path_enc}"
     headers = {
