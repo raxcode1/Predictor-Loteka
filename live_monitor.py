@@ -456,7 +456,11 @@ class LiveMonitor:
             "predictions": state.predictions,
             "pauses": state.pauses,
         }
-        self.save_store(payload)
+        try:
+            self.save_store(payload)
+        except Exception:
+            return
+        self._loaded_predictions = len(state.predictions)
         state.dirty = False
 
     # ------------------------------------------------------------------

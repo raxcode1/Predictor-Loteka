@@ -35,7 +35,10 @@ if WORKER_URL:
 
 BLOB_PATH = "Resultados_RuletaExpress.csv"
 PREDICTIONS_PATH = "ruleta_predictions.json"
-BLOB_TOKEN = os.environ.get("BLOB_READ_WRITE_TOKEN")
+BLOB_TOKEN = (
+    os.environ.get("RULETA_READ_WRITE_TOKEN")
+    or os.environ.get("BLOB_READ_WRITE_TOKEN")
+)
 BLOB_HOST = "https://blob.vercel-storage.com"
 LOCAL_CSV = Path(__file__).resolve().parents[1] / BLOB_PATH
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
@@ -104,41 +107,96 @@ def serialize_rows(rows: list[dict[str, str]]) -> bytes:
 
 
 def prediction_store():
-    """Almacén del registro vivo: Vercel Blob si hay token, memoria si no."""
+    """Almacén del registro vivo: Vercel Blob si hay token, con respaldo local."""
+    local_path = Path(__file__).resolve().parents[1] / "registro_live_api.json"
+    local_loader, local_saver = json_file_store(local_path)
+
     if not BLOB_TOKEN:
-        return memory_store()
+        return local_loader, local_saver
 
     def load() -> dict:
         try:
             raw = blob_request("GET", PREDICTIONS_PATH)
+            try:
+                stored = json.loads(raw.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                try:
+                    local = local_loader()
+                    if local:
+                        return local
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    "El registro de predicciones está dañado; no se sobrescribe."
+                )
+            if isinstance(stored, list):
+                result = {"predictions": stored, "pauses": []}
+                try:
+                    local_saver(result)
+                except Exception:
+                    pass
+                return result
+            if not isinstance(stored, dict):
+                try:
+                    local = local_loader()
+                    if local:
+                        return local
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    "El registro de predicciones no tiene un formato válido; no se sobrescribe."
+                )
+            try:
+                local_saver(stored)
+            except Exception:
+                pass
+            return stored
         except HTTPError as error:
-            if error.code == 404:
+            if error.code in (401, 403, 404):
+                try:
+                    local = local_loader()
+                    if local:
+                        return local
+                except Exception:
+                    pass
                 return {}
+            try:
+                local = local_loader()
+                if local:
+                    return local
+            except Exception:
+                pass
             raise RuntimeError(
                 f"No se pudo leer el registro de predicciones (HTTP {error.code})."
             ) from error
-        try:
-            stored = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        except RuntimeError:
+            raise
+        except Exception:
+            try:
+                local = local_loader()
+                if local:
+                    return local
+            except Exception:
+                pass
             raise RuntimeError(
-                "El registro de predicciones está dañado; no se sobrescribe."
-            ) from error
-        if isinstance(stored, list):
-            return {"predictions": stored, "pauses": []}
-        if not isinstance(stored, dict):
-            raise RuntimeError(
-                "El registro de predicciones no tiene un formato válido; no se sobrescribe."
+                "No se pudo leer el registro de predicciones; no se sobrescribe."
             )
-        return stored
 
     def save(data: dict) -> None:
         payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-        blob_request(
-            "PUT",
-            PREDICTIONS_PATH,
-            payload,
-            "application/json; charset=utf-8",
-        )
+        try:
+            blob_request(
+                "PUT",
+                PREDICTIONS_PATH,
+                payload,
+                "application/json; charset=utf-8",
+            )
+        except Exception:
+            pass
+        try:
+            local_saver(data)
+        except Exception:
+            pass
 
     return load, save
 
@@ -233,16 +291,24 @@ def dashboard() -> dict:
         monitor_payload = m.update(rows)
     except Exception:
         try:
-            # Intentar recrear
             global _monitor
             _monitor = None
             m = live_monitor()
             monitor_payload = m.update(rows)
         except Exception as e:
-            monitor_error = str(e)
+            err = str(e)
+            if "403" in err or "Forbidden" in err:
+                monitor_error = "Usando copia local de predicciones (sin acceso a Vercel Blob)."
+            elif "401" in err:
+                monitor_error = "Sin permisos para leer el registro de predicciones; usando copia local."
+            else:
+                monitor_error = err
             monitor_payload = {}
 
     predictions = monitor_payload.get("predictions", [])
+    if monitor_error and predictions:
+        if "403" in monitor_error or "Forbidden" in monitor_error or "sin acceso" in monitor_error.lower():
+            monitor_error = None
 
     return {
         "results": rows,
