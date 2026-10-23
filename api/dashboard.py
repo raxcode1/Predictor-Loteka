@@ -82,7 +82,9 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
         raise RuntimeError("Falta SUPABASE_SERVICE_ROLE_KEY.")
     if not SUPABASE_BUCKET:
         raise RuntimeError("Falta SUPABASE_BUCKET.")
-    url = storage_object_url(pathname)
+    from urllib.parse import quote
+    clean = pathname.lstrip("/")
+    url = f"{SUPABASE_URL}/storage/v1/object/{quote(SUPABASE_BUCKET, safe='')}/{quote(clean, safe='/')}"
     headers = {
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "apikey": SUPABASE_KEY,
