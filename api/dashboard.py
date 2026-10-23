@@ -93,10 +93,12 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
         "Content-Type": content_type,
         "User-Agent": "ruleta-express-vercel",
     }
+    upload_method = method
     if method == "PUT":
         headers["x-upsert"] = "true"
         headers["cache-control"] = "no-cache"
-    request = Request(url, data=body, method=method, headers=headers)
+        upload_method = "POST"
+    request = Request(url, data=body, method=upload_method, headers=headers)
     try:
         with urlopen(request, timeout=60) as response:
             return response.read()
