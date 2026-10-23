@@ -19,7 +19,7 @@ try:
 except ImportError:
     from api.auth_utils import authorized
 from config_sync import INTERVALO_SINCRONIZACION
-from live_monitor import LiveMonitor, memory_store
+from live_monitor import LiveMonitor, json_file_store, memory_store
 from m4_engine.kelly import KellyConfig
 from sync_ruleta_express import extract_results, fetch_page
 
