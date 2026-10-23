@@ -69,7 +69,10 @@ def storage_object_url(pathname: str) -> str:
     if not SUPABASE_URL or not SUPABASE_BUCKET:
         raise RuntimeError("Faltan SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY o SUPABASE_BUCKET.")
     from urllib.parse import quote
-    return f"{SUPABASE_URL}/storage/v1/object/{quote(SUPABASE_BUCKET)}/{quote(pathname, safe='/')}"
+    # Normalizar path (sin / inicial)
+    clean = pathname.lstrip("/")
+    # Evitar dobles slashes
+    return f"{SUPABASE_URL}/storage/v1/object/{quote(SUPABASE_BUCKET, safe='')}/{quote(clean, safe='/')}"
 
 
 def storage_request(method: str, pathname: str, body: bytes | None = None, content_type: str = "application/json; charset=utf-8") -> bytes:
@@ -151,8 +154,9 @@ def prediction_store():
     def load() -> dict:
         try:
             raw = blob_request("GET", PREDICTIONS_PATH)
-        except HTTPError as error:
-            if error.code == 404:
+        except Exception as error:
+            message = str(error)
+            if "404" in message:
                 return {}
             raise
         try:
