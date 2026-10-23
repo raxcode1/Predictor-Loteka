@@ -194,8 +194,17 @@ def prediction_store():
             raw = blob_request("GET", PREDICTIONS_PATH)
         except Exception as error:
             message = str(error)
-            if "404" in message:
+            # Solo se considera "aún no existe" si Storage responde que la
+            # clave no está. Un 404 genérico o PGRST125 significa ruta
+            # inválida/bucket ausente: si se tratara como lista vacía se
+            # reiniciaría el historial de predicciones comparadas.
+            if "NoSuchKey" in message:
                 return {}
+            if "PGRST125" in message or "Invalid path" in message:
+                raise RuntimeError(
+                    "Supabase Storage: ruta inválida (revisa SUPABASE_URL/SUPABASE_BUCKET). "
+                    "No se reinicia el historial de predicciones."
+                ) from error
             raise
         try:
             stored = json.loads(raw.decode("utf-8"))
