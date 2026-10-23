@@ -397,6 +397,42 @@ def main() -> int:
         f"{len(reloaded_payload['predictions'])} vs {len(live_predictions)}",
     )
 
+    limited_loader, limited_saver = memory_store()
+    limited = LiveMonitor(
+        limited_loader,
+        limited_saver,
+        spec=StrategySpec(),
+        payout=EXPRESS_19,
+        kelly_config=KellyConfig(),
+        bankroll=1000.0,
+        backfill_rounds=40,
+        max_records=10,
+    )
+    limited_payload = limited.update(rows)
+    check(
+        "el límite explícito recorta el registro",
+        len(limited_payload["predictions"]) == 10,
+        f"n={len(limited_payload['predictions'])}",
+    )
+
+    unlimited_loader, unlimited_saver = memory_store()
+    unlimited = LiveMonitor(
+        unlimited_loader,
+        unlimited_saver,
+        spec=StrategySpec(),
+        payout=EXPRESS_19,
+        kelly_config=KellyConfig(),
+        bankroll=1000.0,
+        backfill_rounds=40,
+        max_records=0,
+    )
+    unlimited_payload = unlimited.update(rows)
+    check(
+        "sin límite se conservan todas las rondas",
+        len(unlimited_payload["predictions"]) == len(live_predictions),
+        f"{len(unlimited_payload['predictions'])} vs {len(live_predictions)}",
+    )
+
     stored_live = loader()
     legacy_store = dict(stored_live)
     legacy_store["version"] = 1

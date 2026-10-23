@@ -343,7 +343,7 @@ Todo lo operativo está en `config_alertas.py`:
 | `DISPERSION_MAXIMA` | 0.047 | Dispersión máxima admitida |
 | `NUMEROS_ANCLA` | (1, 7, 8) | Números que activan la confianza «Crítico» |
 | `RONDAS_BACKFILL` | 300 | Rondas retroanalizadas al crear el registro |
-| `RONDAS_GUARDADAS` | 300 | Rondas que se conservan en el registro |
+| `RONDAS_GUARDADAS` | 0 | Rondas que se conservan en el registro; 0 = todas |
 | `FRACCION_KELLY` / `TOPE_EXPOSICION` | 0.25 / 0.02 | Fracción de Kelly y tope por ronda |
 | `OBSERVACIONES_MINIMAS` / `ACIERTO_MINIMO` | 20 / 4 | Evidencia mínima para arriesgar capital |
 | `ARCHIVO_REGISTRO` | `registro_live.json` | Archivo local del registro |

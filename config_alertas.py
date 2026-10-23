@@ -35,8 +35,8 @@ NUMEROS_ANCLA = (1, 7, 8)
 #: Rondas retroanalizadas la primera vez que se crea el registro.
 RONDAS_BACKFILL = 300
 
-#: Rondas que se conservan en el registro (siempre las más recientes).
-RONDAS_GUARDADAS = 300
+#: Rondas que se conservan en el registro. 0 = conservar todas.
+RONDAS_GUARDADAS = 0
 
 #: Archivo local donde se guarda el registro.
 ARCHIVO_REGISTRO = "registro_live.json"

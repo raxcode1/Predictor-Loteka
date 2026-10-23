@@ -333,7 +333,7 @@ class LiveMonitor:
         kelly_config: KellyConfig | None = None,
         bankroll: float = 1000.0,
         backfill_rounds: int = 300,
-        max_records: int = 300,
+        max_records: int = 0,
     ) -> None:
         self.load_store = load_store
         self.save_store = save_store
@@ -342,7 +342,7 @@ class LiveMonitor:
         self.kelly_config = kelly_config or KellyConfig()
         self.bankroll = bankroll
         self.backfill_rounds = max(1, int(backfill_rounds))
-        self.max_records = max(10, int(max_records))
+        self.max_records = max(0, int(max_records))
         self._state = _State()
         self._loaded = False
 
@@ -778,8 +778,8 @@ class LiveMonitor:
             return
 
     def _trim(self, state: _State) -> None:
-        """Conserva sólo las rondas más recientes."""
-        if len(state.predictions) <= self.max_records:
+        """Conserva todas las rondas cuando max_records es 0."""
+        if self.max_records <= 0 or len(state.predictions) <= self.max_records:
             return
         state.predictions = state.predictions[-self.max_records :]
         state.dirty = True
@@ -933,7 +933,6 @@ class LiveMonitor:
 
         return {
             "source_draw": record.get("source_draw"),
-            "last_number": record.get("last_number"),
             "created_at": record.get("created_at"),
             "status": record.get("status"),
             "observed_draw": record.get("observed_draw"),
