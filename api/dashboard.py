@@ -86,12 +86,12 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
     base = SUPABASE_URL.rstrip("/")
     bucket = SUPABASE_BUCKET
     candidates = []
-    candidates.append(f"{base}/storage/v1/object/{quote(bucket)}/{quote(clean)}")
     candidates.append(f"{base}/storage/v1/object/{bucket}/{quote(clean)}")
+    candidates.append(f"{base}/storage/v1/object/{quote(bucket)}/{quote(clean)}")
     candidates.append(f"{base}/storage/v1/object/{quote(bucket, safe='')}/{quote(clean, safe='')}")
-    candidates.append(f"{base}/storage/v1/object/public/{quote(bucket)}/{quote(clean)}")
     candidates.append(f"{base}/storage/v1/object/public/{bucket}/{quote(clean)}")
-    candidates.append(f"{base}/storage/v1/s3/object/{quote(bucket)}/{quote(clean)}")
+    candidates.append(f"{base}/storage/v1/object/sign/{bucket}/{quote(clean)}")
+    candidates.append(f"{base}/storage/v1/s3/{bucket}/{quote(clean)}")
     last_error = None
     for url in candidates:
         headers = {
