@@ -32,15 +32,13 @@ if WORKER_URL:
     sync_ruleta_express.URL = f"{WORKER_URL}/"
     import scraper_web
     scraper_web.URL = f"{WORKER_URL}/"
-BLOB_PATH = "Resultados_RuletaExpress.csv"
 PREDICTIONS_PATH = "ruleta_predictions.json"
-BLOB_TOKEN = (
-    os.environ.get("RULETA_READ_WRITE_TOKEN")
-    or os.environ.get("BLOB_READ_WRITE_TOKEN")
-)
-BLOB_API_HOST = "https://vercel.com/api/blob"
-LOCAL_CSV = Path(__file__).resolve().parents[1] / BLOB_PATH
+LOCAL_CSV = Path(__file__).resolve().parents[1] / "Resultados_RuletaExpress.csv"
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+SUPABASE_BUCKET = os.environ.get("SUPABASE_BUCKET", "ruleta-data").strip()
 
 
 _cached_draw: str | None = None
@@ -49,53 +47,36 @@ _monitor: LiveMonitor | None = None
 _last_csv_hash: str | None = None
 
 
+def storage_object_url(pathname: str) -> str:
+    if not SUPABASE_URL or not SUPABASE_BUCKET:
+        raise RuntimeError("Faltan SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY o SUPABASE_BUCKET.")
+    from urllib.parse import quote
+    return f"{SUPABASE_URL}/storage/v1/object/{quote(SUPABASE_BUCKET)}/{quote(pathname, safe='/')}"
+
+
+def storage_request(method: str, pathname: str, body: bytes | None = None, content_type: str = "application/json; charset=utf-8") -> bytes:
+    if not SUPABASE_KEY:
+        raise RuntimeError("Falta SUPABASE_SERVICE_ROLE_KEY.")
+    url = storage_object_url(pathname)
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": SUPABASE_KEY,
+        "Content-Type": content_type,
+    }
+    if method == "PUT":
+        headers["x-upsert"] = "true"
+    request = Request(url, data=body, method=method, headers=headers)
+    with urlopen(request, timeout=30) as response:
+        return response.read()
+
+
 def blob_request(
     method: str,
     pathname: str = "",
     body: bytes | None = None,
     content_type: str = "application/octet-stream",
 ) -> bytes:
-    if not BLOB_TOKEN:
-        raise RuntimeError("Falta la variable de entorno BLOB_READ_WRITE_TOKEN.")
-    if method in ("PUT", "POST") and pathname:
-        from urllib.parse import quote
-        url = f"{BLOB_API_HOST}/?pathname={quote(pathname)}"
-        headers = {
-            "Authorization": f"Bearer {BLOB_TOKEN}",
-            "x-api-version": "12",
-            "x-vercel-blob-access": "private",
-            "Content-Type": content_type,
-        }
-        request = Request(url, data=body, method=method, headers=headers)
-    elif method == "GET" and pathname:
-        from urllib.parse import quote
-        url = f"{BLOB_API_HOST}/?pathname={quote(pathname)}"
-        headers = {
-            "Authorization": f"Bearer {BLOB_TOKEN}",
-            "x-api-version": "12",
-        }
-        request = Request(url, method=method, headers=headers)
-    elif pathname:
-        from urllib.parse import quote
-        url = f"{BLOB_API_HOST}/?pathname={quote(pathname)}"
-        headers = {
-            "Authorization": f"Bearer {BLOB_TOKEN}",
-            "x-api-version": "12",
-        }
-        request = Request(url, data=body, method=method, headers=headers)
-    else:
-        request = Request(
-            BLOB_API_HOST,
-            data=body,
-            method=method,
-            headers={
-                "Authorization": f"Bearer {BLOB_TOKEN}",
-                "x-api-version": "12",
-                "Content-Type": content_type,
-            },
-        )
-    with urlopen(request, timeout=30) as response:
-        return response.read()
+    return storage_request(method, pathname, body, content_type)
 
 
 def read_csv_bytes(data: bytes) -> list[dict[str, str]]:
@@ -107,22 +88,17 @@ def read_csv_bytes(data: bytes) -> list[dict[str, str]]:
 
 
 def read_rows() -> list[dict[str, str]]:
-    "Carga el CSV remoto y combina el histórico versionado como respaldo/base."
+    "Carga el CSV remoto y combina el hist��rico versionado como respaldo/base."
     local_rows: list[dict[str, str]] = []
     if LOCAL_CSV.exists():
         try:
             local_rows = read_csv_bytes(LOCAL_CSV.read_bytes())
         except Exception:
             local_rows = []
-
-    if not BLOB_TOKEN:
-        return local_rows
     try:
-        remote_rows = read_csv_bytes(blob_request("GET", BLOB_PATH))
+        remote_rows = read_csv_bytes(blob_request("GET", "Resultados_RuletaExpress.csv"))
     except Exception:
         return local_rows
-    # Blob puede contener un histórico truncado/desactualizado. No permitir que
-    # esos datos sustituyan el CSV completo incluido en el deployment.
     return merge_results(local_rows, remote_rows)
 
 
@@ -135,9 +111,9 @@ def serialize_rows(rows: list[dict[str, str]]) -> bytes:
 
 
 def prediction_store():
-    """Almacén del registro vivo: Vercel Blob."""
-    if not BLOB_TOKEN:
-        raise RuntimeError("Falta RULETA_READ_WRITE_TOKEN o BLOB_READ_WRITE_TOKEN.")
+    """Almacén del registro vivo: Supabase Storage."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise RuntimeError("Faltan SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY o SUPABASE_BUCKET.")
 
     def load() -> dict:
         try:
@@ -234,7 +210,7 @@ def dashboard() -> dict:
     if horario["abierto"]:
         try:
             current = merge_results(rows, extract_results(fetch_page()))
-            if BLOB_TOKEN and len(current) > len(rows):
+            if SUPABASE_URL and SUPABASE_KEY and len(current) > len(rows):
                 try:
                     global _last_csv_hash
                     payload_csv = serialize_rows(current)
@@ -242,7 +218,7 @@ def dashboard() -> dict:
                     if current_hash != _last_csv_hash:
                         blob_request(
                             "PUT",
-                            BLOB_PATH,
+                            "Resultados_RuletaExpress.csv",
                             payload_csv,
                             "text/csv; charset=utf-8",
                         )
