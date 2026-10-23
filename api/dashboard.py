@@ -97,7 +97,6 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
     if method == "PUT":
         headers["x-upsert"] = "true"
         headers["cache-control"] = "no-cache"
-        upload_method = "POST"
     request = Request(url, data=body, method=upload_method, headers=headers)
     try:
         with urlopen(request, timeout=60) as response:
