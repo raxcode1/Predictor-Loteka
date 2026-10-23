@@ -458,6 +458,7 @@ class LiveMonitor:
             and self._loaded_predictions
             and len(state.predictions) < self._loaded_predictions
         ):
+            state.dirty = False
             return
 
         total = len(state.predictions)
@@ -471,12 +472,15 @@ class LiveMonitor:
         should_save = False
         if self._last_saved_count == 0 and total > 0:
             should_save = True
-        elif total != self._last_saved_count:
+        elif total > self._last_saved_count:
             should_save = True
         elif resolved != self._last_saved_resolved:
             should_save = True
         elif pauses != self._last_saved_pauses:
             should_save = True
+        elif total < self._last_saved_count:
+            state.dirty = False
+            return
 
         if not should_save:
             state.dirty = False
@@ -739,6 +743,8 @@ class LiveMonitor:
             # Las predicciones pendientes se conservan tal como se guardaron.
             self._trim(state)
 
+        if state.dirty and self._loaded_predictions and len(state.predictions) < self._loaded_predictions:
+            state.dirty = False
         self._persist(state)
         return self.payload()
 
