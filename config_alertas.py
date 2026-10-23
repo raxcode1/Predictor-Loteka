@@ -32,8 +32,9 @@ DISPERSION_MAXIMA = 0.047
 #: Números de anclaje (factor acelerador de la especificación).
 NUMEROS_ANCLA = (1, 7, 8)
 
-#: Rondas retroanalizadas la primera vez que se crea el registro.
-RONDAS_BACKFILL = 300
+#: Rondas retroanalizadas al crear el registro. 0 = no reconstruir;
+#: solo se guardan las predicciones tomadas en vivo.
+RONDAS_BACKFILL = 0
 
 #: Rondas que se conservan en el registro. 0 = conservar todas.
 RONDAS_GUARDADAS = 0

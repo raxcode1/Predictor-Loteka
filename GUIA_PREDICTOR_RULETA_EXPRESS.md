@@ -260,7 +260,7 @@ Invoke-RestMethod http://127.0.0.1:8000/api/dashboard
 | `ModuleNotFoundError: pandas` | Entorno sin dependencias | `python -m pip install -r requirements.txt` |
 | La alerta muestra «SIN DATOS» | El CSV tiene menos de dos sorteos | Sincroniza antes: `python .\sync_ruleta_express.py` |
 | «Error de sincronización» | Loteka bloqueó la IP | Sube `INTERVALO_SINCRONIZACION` a 60 en `config_sync.py` y reinicia |
-| El panel tarda al arrancar | Retroanálisis inicial de 300 rondas | Ocurre una sola vez; después se lee de `registro_live.json` |
+| El panel tarda al arrancar | Retroanálisis si `RONDAS_BACKFILL` es mayor que 0 | Ocurre una sola vez; con el valor 0 no se reconstruye historial |
 
 ### El registro no se versiona
 
@@ -342,7 +342,7 @@ Todo lo operativo está en `config_alertas.py`:
 | `LIMITE_INFERIOR` / `LIMITE_SUPERIOR` | 0.05 / 0.07 | Ventana operativa de P(M4) |
 | `DISPERSION_MAXIMA` | 0.047 | Dispersión máxima admitida |
 | `NUMEROS_ANCLA` | (1, 7, 8) | Números que activan la confianza «Crítico» |
-| `RONDAS_BACKFILL` | 300 | Rondas retroanalizadas al crear el registro |
+| `RONDAS_BACKFILL` | 0 | Rondas retroanalizadas al crear el registro; 0 = no reconstruir |
 | `RONDAS_GUARDADAS` | 0 | Rondas que se conservan en el registro; 0 = todas |
 | `FRACCION_KELLY` / `TOPE_EXPOSICION` | 0.25 / 0.02 | Fracción de Kelly y tope por ronda |
 | `OBSERVACIONES_MINIMAS` / `ACIERTO_MINIMO` | 20 / 4 | Evidencia mínima para arriesgar capital |

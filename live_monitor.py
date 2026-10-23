@@ -42,10 +42,9 @@ from state_recovery import build_recovery_rankings, select_markov_model
 
 STORE_VERSION = 3
 
-#: Sorteo mínimo que se conserva en el registro. Se mantiene en 0 para no
-#: borrar predicciones reales ya almacenadas; las rondas nuevas se siguen
-#: abriendo en vivo, sin reconstruir el historial.
-PREDICTIONS_START_DRAW = 0
+#: Primer sorteo con predicciones reales guardadas. Los registros anteriores
+#: se descartan porque son retroanálisis, no datos tomados en vivo.
+PREDICTIONS_START_DRAW = 249984
 
 STATUS_PENDIENTE = "pendiente"
 STATUS_ACIERTO = "acierto"
@@ -188,6 +187,56 @@ def _normalize_stats(raw: Any) -> dict[str, int]:
                     stats[key] = int(value)
                 except (TypeError, ValueError):
                     continue
+    return stats
+
+
+def _stats_from_predictions(
+    predictions: list[dict],
+    pauses: list[dict],
+    spec: StrategySpec,
+) -> dict[str, int]:
+    """Recalcula los contadores a partir de los registros conservados."""
+    stats = _empty_stats()
+    for record in predictions:
+        if record.get("status") not in (STATUS_ACIERTO, STATUS_FALLO):
+            continue
+
+        markov_rank = record.get("markov_rank")
+        heuristic_rank = record.get("heuristic_rank")
+        stats["rounds"] += 1
+        stats["markov_trials"] += 1
+        stats["markov_hits"] += int(markov_rank is not None)
+        stats["markov_top1_hits"] += int(markov_rank == 1)
+        stats["heuristic_trials"] += 1
+        stats["heuristic_hits"] += int(heuristic_rank is not None)
+        stats["heuristic_top1_hits"] += int(heuristic_rank == 1)
+
+        decision = record.get("decision") or {}
+        probability = decision.get("probability")
+        number = decision.get("number")
+        actual = record.get("actual_number")
+        if probability is not None:
+            try:
+                probability = float(probability)
+            except (TypeError, ValueError):
+                probability = None
+            if probability is not None and spec.probability_min < probability <= spec.probability_max:
+                stats["window_rounds"] += 1
+                try:
+                    hit = actual is not None and number is not None and int(actual) == int(number)
+                except (TypeError, ValueError):
+                    hit = False
+                stats["window_hits"] += int(hit)
+
+        if decision.get("fired"):
+            hit = bool(record.get("alert_hit"))
+            stats["alerts"] += 1
+            stats["alert_hits"] += int(hit)
+            if decision.get("anchor"):
+                stats["anchor_alerts"] += 1
+                stats["anchor_hits"] += int(hit)
+
+    stats["pauses"] = len(pauses)
     return stats
 
 
@@ -341,7 +390,7 @@ class LiveMonitor:
         self.payout = payout
         self.kelly_config = kelly_config or KellyConfig()
         self.bankroll = bankroll
-        self.backfill_rounds = max(1, int(backfill_rounds))
+        self.backfill_rounds = max(0, int(backfill_rounds))
         self.max_records = max(0, int(max_records))
         self._state = _State()
         self._loaded = False
@@ -366,13 +415,17 @@ class LiveMonitor:
                 else:
                     dropped += 1
             predictions = eligible
+            pauses = list(stored.get("pauses") or [])
+            stats = _stats_from_predictions(predictions, pauses, self.spec)
+            stored_stats = _normalize_stats(stored.get("stats"))
             self._state = _State(
                 predictions=predictions,
-                pauses=list(stored.get("pauses") or []),
-                stats=_normalize_stats(stored.get("stats")),
+                pauses=pauses,
+                stats=stats,
+                dirty=bool(dropped) or stats != stored_stats,
             )
             # Nunca se reemplaza un registro existente por uno reconstruido.
-            # Sólo se siembra desde el CSV cuando todavía no hay predicciones.
+            # Solo se siembra desde el CSV cuando todavía no hay predicciones.
             self._loaded = True
         return self._state
 
@@ -597,14 +650,15 @@ class LiveMonitor:
 
         if len(draws) >= 2:
             values = [value for _, _, value in draws]
-            forecasts = build_forecasts(values, self.backfill_rounds)
+            forecast_rounds = self.backfill_rounds or 1
+            forecasts = build_forecasts(values, forecast_rounds)
             if forecasts:
                 # La tabla debe comparar el mismo ranking que el panel principal:
                 # modelo Markov seleccionado por holdout + heurístico ponderado.
                 selected_model, _ = select_markov_model(values)
                 rankings = build_recovery_rankings(
                     values,
-                    self.backfill_rounds,
+                    forecast_rounds,
                     model=selected_model,
                 )
                 for forecast, ranking in zip(forecasts, rankings):
@@ -612,7 +666,10 @@ class LiveMonitor:
                     forecast.heuristic = ranking["heuristic"]
             if not state.predictions:
                 state.stats = _empty_stats()
-                self._backfill(state, draws, engine, forecasts)
+                if self.backfill_rounds > 0:
+                    self._backfill(state, draws, engine, forecasts)
+                else:
+                    self._open(state, draws, engine, forecasts)
             else:
                 self._resolve(state, draws, engine)
                 self._open(state, draws, engine, forecasts)
@@ -862,6 +919,7 @@ class LiveMonitor:
         heuristic_trials = stats["heuristic_trials"]
         return {
             "rounds": stats["rounds"],
+            "start_draw": PREDICTIONS_START_DRAW,
             "markov_hits": stats["markov_hits"],
             "markov_trials": markov_trials,
             "markov_rate": (stats["markov_hits"] / markov_trials) if markov_trials else 0.0,

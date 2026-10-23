@@ -148,7 +148,7 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 ## 7. Disco persistente (opcional, plan de pago)
 
 Sin disco, el worker arranca con el CSV del repositorio y el servicio web
-reconstruye el registro vivo al calcular. Los sorteos que se pierdan durante
+conserva las predicciones ya guardadas en su almacén; no reconstruye el historial. Los sorteos que se pierdan durante
 un reinicio los recupera el envío completo que el worker detecta y repite.
 
 Con disco, en cada servicio: **Disks > Add Disk**, montar en `/var/data` y
@@ -229,7 +229,7 @@ y patrón natural**, no camuflarse.
 | Automático sin PC | sí (scraping desde datacenter) | sí (scraping desde worker, con proxy opcional) |
 | Scraper | dentro de la función | worker dedicado, con pausa persistida |
 | Resiliencia a un bloqueo | la función sigue fallando | el dashboard sobrevive; el worker reintenta |
-| Estado | Vercel Blob | disco o memoria, reconstruido |
+| Estado | Vercel Blob | disco; en memoria sólo la ronda en vivo |
 | Ritmo de refresco | 45 s | 30 s |
 
 Puedes usar los dos a la vez: Vercel como URL de respaldo y Render como

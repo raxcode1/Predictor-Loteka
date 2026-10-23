@@ -433,6 +433,80 @@ def main() -> int:
         f"{len(unlimited_payload['predictions'])} vs {len(live_predictions)}",
     )
 
+    fresh_loader, fresh_saver = memory_store()
+    fresh = LiveMonitor(
+        fresh_loader,
+        fresh_saver,
+        spec=StrategySpec(),
+        payout=EXPRESS_19,
+        kelly_config=KellyConfig(),
+        bankroll=1000.0,
+        backfill_rounds=0,
+        max_records=0,
+    )
+    fresh_payload = fresh.update(rows)
+    check(
+        "sin backfill sólo se guarda la ronda tomada en vivo",
+        len(fresh_payload["predictions"]) == 1
+        and fresh_payload["predictions"][0]["status"] == "pendiente"
+        and fresh_payload["prediction_stats"]["rounds"] == 0,
+        f"n={len(fresh_payload['predictions'])}",
+    )
+
+    stale = unlimited_loader()
+    stale_store = {
+        "version": stale.get("version"),
+        "updated_at": stale.get("updated_at"),
+        "stats": dict(stale.get("stats") or {}),
+        "predictions": [dict(record) for record in stale.get("predictions") or []],
+        "pauses": [dict(pause) for pause in stale.get("pauses") or []],
+    }
+    fake = dict(stale_store["predictions"][0])
+    fake.update(
+        {
+            "source_number": PREDICTIONS_START_DRAW - 1,
+            "source_draw": f"No. {PREDICTIONS_START_DRAW - 1}",
+            "status": "fallo",
+            "actual_number": 0,
+            "markov_rank": None,
+            "heuristic_rank": None,
+            "decision": {},
+            "alert_hit": None,
+        }
+    )
+    stale_store["predictions"].append(fake)
+    stale_store["stats"]["rounds"] = 999
+    stale_loader, stale_saver = memory_store()
+    stale_saver(stale_store)
+    filtered = LiveMonitor(
+        stale_loader,
+        stale_saver,
+        spec=StrategySpec(),
+        payout=EXPRESS_19,
+        kelly_config=KellyConfig(),
+        bankroll=1000.0,
+        backfill_rounds=40,
+        max_records=0,
+    )
+    filtered_payload = filtered.update(rows)
+    filtered_resolved = [
+        item
+        for item in filtered_payload["predictions"]
+        if item["status"] in ("acierto", "fallo")
+    ]
+    check(
+        "se descartan las predicciones anteriores al corte real",
+        all(
+            int(item["source_draw"].split()[-1]) >= PREDICTIONS_START_DRAW
+            for item in filtered_payload["predictions"]
+        ),
+    )
+    check(
+        "las rondas evaluadas se recalculan desde los registros",
+        filtered_payload["prediction_stats"]["rounds"] == len(filtered_resolved),
+        f"{filtered_payload['prediction_stats']['rounds']} vs {len(filtered_resolved)}",
+    )
+
     stored_live = loader()
     legacy_store = dict(stored_live)
     legacy_store["version"] = 1
