@@ -83,10 +83,9 @@ def storage_request(method: str, pathname: str, body: bytes | None = None, conte
         raise RuntimeError("Falta SUPABASE_BUCKET.")
     from urllib.parse import quote
     clean = pathname.strip().lstrip("/")
-    bucket_enc = quote(SUPABASE_BUCKET)
+    # No codificar el nombre del bucket, solo el path
     path_enc = quote(clean, safe='')
-    # Probar ruta exacta sin doble codificación problemática
-    url = f"{SUPABASE_URL}/storage/v1/object/{bucket_enc}/{path_enc}"
+    url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{path_enc}"
     headers = {
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "apikey": SUPABASE_KEY,
