@@ -33,6 +33,11 @@ HORA_APERTURA = time(5, 0)
 #: Hora de cierre de la publicación (22:00).
 HORA_CIERRE = time(22, 0)
 
+#: Margen de gracia tras el cierre, en minutos. El último sorteo de la
+#: noche (el de las 9:58 PM) se publica justo al cierre; consultando
+#: unos minutos más se captura en lugar de quedarse en el penúltimo.
+MINUTOS_GRACIA_CIERRE = 10
+
 #: Trozo máximo de espera al dormir, para poder parar el proceso a tiempo.
 PASO_ESPERA = 60
 
@@ -49,10 +54,21 @@ def _local(momento: datetime | None = None) -> datetime:
     return momento.astimezone(ZONA)
 
 
+def cierre_con_gracia() -> time:
+    """Hora de cierre efectiva, con el margen de gracia aplicado."""
+    total = HORA_CIERRE.hour * 60 + HORA_CIERRE.minute + MINUTOS_GRACIA_CIERRE
+    return time(total // 60 % 24, total % 60)
+
+
 def abierto(momento: datetime | None = None) -> bool:
-    """¿Está Loteka publicando en este momento?"""
+    """¿Está Loteka publicando en este momento?
+
+    Se sigue consultando unos minutos después del cierre oficial
+    (``MINUTOS_GRACIA_CIERRE``) para no perder el último sorteo de la
+    noche, que se publica justo al cierre.
+    """
     local = _local(momento)
-    return HORA_APERTURA <= local.time() < HORA_CIERRE
+    return HORA_APERTURA <= local.time() < cierre_con_gracia()
 
 
 def segundos_hasta_apertura(momento: datetime | None = None) -> int:
@@ -121,6 +137,7 @@ def estado() -> dict:
         "zona": "America/Santo_Domingo",
         "apertura": HORA_APERTURA.strftime("%H:%M"),
         "cierre": HORA_CIERRE.strftime("%H:%M"),
+        "cierre_con_gracia": cierre_con_gracia().strftime("%H:%M"),
         "abierto": abierto(local),
         "hora_local": local.strftime("%H:%M:%S"),
         "segundos_hasta_apertura": segundos_hasta_apertura(local),
