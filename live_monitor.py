@@ -697,7 +697,23 @@ class LiveMonitor:
 
         if len(draws) >= 2:
             values = [value for _, _, value in draws]
-            forecast_rounds = self.backfill_rounds or 1
+            # Si hay predicciones guardadas, calcular cuántos sorteos nuevos
+            # llegaron desde la última fuente: hay que abrir una predicción
+            # por cada uno para que ninguno se salte (p. ej. tras una pausa
+            # nocturna llegan muchos sorteos de golpe).
+            previous_source = max(
+                (
+                    int(record["source_number"])
+                    for record in self._load().predictions
+                    if record.get("source_number") is not None
+                ),
+                default=None,
+            )
+            if previous_source is None:
+                forecast_rounds = self.backfill_rounds or 1
+            else:
+                nuevos = sum(1 for numero, _, _ in draws if numero > previous_source)
+                forecast_rounds = max(self.backfill_rounds, nuevos, 1)
             forecasts = build_forecasts(values, forecast_rounds)
             if forecasts:
                 # La tabla debe comparar el mismo ranking que el panel principal:
@@ -808,30 +824,54 @@ class LiveMonitor:
         engine: AlertEngine,
         forecasts: list[LiveForecast],
     ) -> None:
-        """Abre la ronda pendiente con la predicción del último sorteo."""
+        """Abre una predicción por cada sorteo nuevo (ninguno se salta).
+
+        Antes sólo se abría la ronda del último sorteo: si llegaban varios
+        sorteos de una vez (pausa nocturna, hueco recuperado), los
+        intermedios quedaban sin predicción comparada.
+        """
         if not forecasts:
             return
-        number, label, _ = draws[-1]
-        if number < PREDICTIONS_START_DRAW:
-            return
-        if any(record.get("source_number") == number for record in state.predictions):
-            return
-
         previous_sources = [
             int(record["source_number"])
             for record in state.predictions
             if record.get("source_number") is not None
         ]
-        if previous_sources:
-            previous = max(previous_sources)
-            if number > previous + 1:
-                self._register_pause(state, previous + 1, number - 1)
-
-        record = self._build_record(label, number, forecasts[-1])
-        record["origin"] = "live"
-        record["decision"] = self._evaluate(engine, record)
-        state.predictions.append(record)
-        state.dirty = True
+        previous = max(previous_sources) if previous_sources else None
+        first_index = len(draws) - len(forecasts)
+        opened = False
+        for index in range(max(first_index, 0), len(draws)):
+            number, label, _ = draws[index]
+            if number < PREDICTIONS_START_DRAW:
+                continue
+            if previous is not None and number <= previous:
+                continue
+            if any(
+                record.get("source_number") == number
+                for record in state.predictions
+            ):
+                continue
+            record = self._build_record(label, number, forecasts[index - first_index])
+            record["origin"] = "live"
+            record["decision"] = self._evaluate(engine, record)
+            state.predictions.append(record)
+            if index + 1 < len(draws):
+                next_number, next_label, next_value = draws[index + 1]
+                if next_number == number + 1:
+                    self._close(engine, record, next_label, next_value, state)
+                else:
+                    self._register_pause(state, number + 1, next_number - 1)
+                    record.update(
+                        {
+                            "status": STATUS_OMITIDA,
+                            "observed_draw": next_label,
+                            "actual_number": None,
+                            "matched": "no evaluada",
+                        }
+                    )
+            opened = True
+        if opened:
+            state.dirty = True
 
     def _reopen_omitted(
         self,
