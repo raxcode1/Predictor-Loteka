@@ -109,9 +109,22 @@ def extract_results(html: str) -> list[dict[str, str]]:
 def fetch_history_date(day: date) -> list[dict[str, str]]:
     "Recupera todos los resultados publicados por Loteka para una fecha."
     params = urlencode({"fechaSeleccionada": day.strftime("%d/%m/%Y")})
+    # El mismo bloqueo de IP que afecta al homepage afecta al endpoint
+    # histórico: si hay Worker de Cloudflare configurado, pasar por él.
+    # El Worker reenvía pathname + search tal cual, así que basta con
+    # sustituir el origen.
+    if WORKER_URL:
+        base = WORKER_URL
+        headers = {"User-Agent": "Mozilla/5.0"}
+    else:
+        base = "https://loteka.com.do"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://loteka.com.do/",
+        }
     request = Request(
-        f"https://loteka.com.do/wp-content/themes/loteka/getRuletaExpress.php?{params}",
-        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://loteka.com.do/"},
+        f"{base}/wp-content/themes/loteka/getRuletaExpress.php?{params}",
+        headers=headers,
     )
     with urlopen(request, timeout=30) as response:
         html = response.read().decode("utf-8", errors="replace")

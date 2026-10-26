@@ -21,7 +21,16 @@ except ImportError:
 from config_sync import INTERVALO_SINCRONIZACION
 from live_monitor import LiveMonitor, json_file_store, memory_store
 from m4_engine.kelly import KellyConfig
-from sync_ruleta_express import extract_results, fetch_page
+from sync_ruleta_express import (
+    backfill_missing_draws,
+    extract_results,
+    fetch_page,
+)
+
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover
+    pd = None
 
 
 # Configurar URL usando Worker si está disponible
@@ -253,6 +262,28 @@ def live_monitor() -> LiveMonitor:
     return _monitor
 
 
+def backfill_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Recupera del histórico diario de Loteka los sorteos que faltan.
+
+    El homepage de Loteka a veces se congela y deja de listar los sorteos
+    de las últimas horas de la noche; el endpoint histórico sí los publica.
+    Sin este relleno, el monitor vivo interpreta el hueco como una «pausa»
+    y marca predicciones como «no evaluadas» que en realidad sí tenían
+    resultado. Limitado a los últimos días (BACKFILL_RECENT_DAYS) para no
+    golpear el origen en cada petición.
+    """
+    if pd is None or not rows:
+        return rows
+    try:
+        frame = pd.DataFrame(rows, columns=EXPECTED_COLUMNS)
+        recovered = backfill_missing_draws(frame, [])
+    except Exception:
+        return rows
+    if not recovered:
+        return rows
+    return merge_results(rows, recovered)
+
+
 def merge_results(rows: list[dict[str, str]], new_rows: list[dict[str, str]]) -> list[dict[str, str]]:
     merged = {row["No_Sorteo"]: row for row in rows if row.get("No_Sorteo")}
     merged.update({row["No_Sorteo"]: row for row in new_rows})
@@ -293,7 +324,12 @@ def dashboard() -> dict:
     # no se consulta el origen: se sirven los datos guardados.
     if horario["abierto"]:
         try:
-            current = merge_results(rows, extract_results(fetch_page()))
+            fresh = extract_results(fetch_page())
+            current = merge_results(rows, fresh)
+            # El homepage puede quedarse corto (se congela por horas): si hay
+            # huecos respecto al histórico, se recuperan antes de alimentar
+            # al monitor, para que no se registren pausas falsas.
+            current = backfill_rows(current)
             if SUPABASE_URL and SUPABASE_KEY and len(current) >= len(rows):
                 try:
                     global _last_csv_hash
@@ -307,6 +343,7 @@ def dashboard() -> dict:
                             "text/csv; charset=utf-8",
                         )
                         _last_csv_hash = current_hash
+                        rows = current
                 except Exception as ex:
                     error = f"Error guardando CSV en Supabase: {ex}"
             rows = current
