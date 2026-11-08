@@ -1,6 +1,19 @@
 ﻿// Cloudflare Worker para hacer proxy de loteka.com.do
 // Esto evita que tu sitio sea bloqueado directamente por Loteka
 
+// CORS restringido: sólo se devuelve Access-Control-Allow-Origin a los
+// orígenes listados en la variable ALLOWED_ORIGINS (separados por comas).
+// Por defecto no se emite (el uso servidor-a-servidor no necesita CORS).
+export function corsOrigin(request, env) {
+  const origin = request.headers.get('Origin');
+  if (!origin) return null;
+  const allowed = String((env && env.ALLOWED_ORIGINS) || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return allowed.includes(origin) ? origin : null;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -32,8 +45,12 @@ export default {
       
       // Copiar respuesta
       const responseHeaders = new Headers(response.headers);
-      // Permitir CORS si es necesario
-      responseHeaders.set('Access-Control-Allow-Origin', '*');
+      responseHeaders.delete('Access-Control-Allow-Origin');
+      const allowedOrigin = corsOrigin(request, env);
+      if (allowedOrigin) {
+        responseHeaders.set('Access-Control-Allow-Origin', allowedOrigin);
+        responseHeaders.set('Vary', 'Origin');
+      }
       
       return new Response(response.body, {
         status: response.status,

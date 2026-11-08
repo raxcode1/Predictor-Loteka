@@ -37,6 +37,7 @@ except ImportError:
 
 from live_monitor import LiveMonitor, json_file_store, memory_store
 from m4_engine.kelly import KellyConfig
+from quant import integration as quant_integration
 
 import os
 
@@ -129,6 +130,8 @@ class Estado:
         self.monitor_error: str | None = None
         self.last_sync: str | None = None
         self.push_error: str | None = None
+        self.quant: dict[str, Any] | None = None
+        self.quant_error: str | None = "informe cuantitativo pendiente de cálculo"
 
         self.data_dir = Path(DATA_DIR) if DATA_DIR else None
         if self.data_dir:
@@ -174,6 +177,9 @@ class Estado:
         except Exception as error:  # pragma: no cover - defensivo
             self.monitor_error = str(error)
         self.last_sync = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        # El informe cuantitativo tarda ~1-2 s: se calcula en segundo plano
+        # para no bloquear el arranque del servicio.
+        threading.Thread(target=self.actualizar_quant, daemon=True).start()
 
     def _persistir_csv(self) -> None:
         try:
@@ -200,8 +206,18 @@ class Estado:
                 "fingerprint": huella(self.rows),
             }
 
+    def actualizar_quant(self) -> None:
+        """Recalcula el informe cuantitativo (cacheado por hash del dataset)."""
+        with self.lock:
+            rows = list(self.rows)
+        summary, error = quant_integration.analysis_for_rows(rows)
+        with self.lock:
+            self.quant = summary
+            self.quant_error = error
+
     def actualizar_recovery(self) -> None:
         """Recalcula el análisis estadístico (tarda unos segundos)."""
+        self.actualizar_quant()
         try:
             recovery = state_recovery.build_state_recovery(self.csv_path)
         except Exception as error:
@@ -227,7 +243,9 @@ class Estado:
                 "refresh_interval_seconds": REFRESH_SECONDS,
             }
             payload.update(self.monitor.payload())
-            return payload
+            return quant_integration.attach(
+                payload, summary=self.quant, error=self.quant_error
+            )
 
 
 estado = Estado()
@@ -241,6 +259,32 @@ def autorizado() -> bool:
 @app.get("/healthz")
 def healthz() -> Any:
     return jsonify({"ok": True, "rows": len(estado.rows)})
+
+
+@app.get("/readyz")
+def readyz() -> Any:
+    with estado.lock:
+        checks = {
+            "rows": bool(estado.rows),
+            "monitor": estado.monitor_error is None,
+            "quant": estado.quant is not None,
+        }
+    ready = all(checks.values())
+    return jsonify({"ready": ready, "checks": checks}), (200 if ready else 503)
+
+
+@app.get("/api/v2/analysis")
+def analysis() -> Any:
+    if not autorizado():
+        return jsonify({"error": "Autenticación requerida"}), 401
+    with estado.lock:
+        return jsonify(
+            {
+                "api_version": quant_integration.API_VERSION,
+                "quant": estado.quant,
+                "quant_error": estado.quant_error,
+            }
+        )
 
 
 @app.get("/")

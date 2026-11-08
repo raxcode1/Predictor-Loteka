@@ -5,6 +5,19 @@
 // (getRuletaExpress.php?fechaSeleccionada=...), que son las que rellenan los
 // sorteos faltantes. Sin ese relleno, el panel detecta huecos de numeración y
 // los muestra como «sorteos no evaluados» aunque Loteka sí los publicó.
+// CORS restringido: sólo se devuelve Access-Control-Allow-Origin a los
+// orígenes listados en la variable ALLOWED_ORIGINS (separados por comas).
+// Por defecto no se emite (el uso servidor-a-servidor no necesita CORS).
+export function corsOrigin(request, env) {
+  const origin = request.headers.get('Origin');
+  if (!origin) return null;
+  const allowed = String((env && env.ALLOWED_ORIGINS) || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return allowed.includes(origin) ? origin : null;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const incoming = new URL(request.url);
@@ -41,7 +54,12 @@ export default {
       });
 
       const newHeaders = new Headers(response.headers);
-      newHeaders.set('Access-Control-Allow-Origin', '*');
+      newHeaders.delete('Access-Control-Allow-Origin');
+      const allowedOrigin = corsOrigin(request, env);
+      if (allowedOrigin) {
+        newHeaders.set('Access-Control-Allow-Origin', allowedOrigin);
+        newHeaders.set('Vary', 'Origin');
+      }
       newHeaders.set('Cache-Control', 'no-store');
 
       return new Response(response.body, {

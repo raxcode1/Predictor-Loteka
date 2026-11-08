@@ -2,6 +2,9 @@ const number = (value) => String(value).padStart(2, "0");
 const percent = (value) => `${(value * 100).toFixed(2)}%`;
 const units = (value) => `${Number(value).toFixed(2)} u`;
 const isBlank = (value) => value === null || value === undefined;
+const escapeHtml = (value) =>
+  String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtP = (value) => (isBlank(value) ? "-" : Number(value) < 1e-4 ? Number(value).toExponential(1) : Number(value).toFixed(4));
 
 // El intervalo real llega en la respuesta de la API (config_sync.py).
 // Este valor sólo se usa hasta la primera respuesta.
@@ -34,6 +37,7 @@ function render(data) {
 
   renderRecovery(data.recovery, data.recovery_error);
   renderResults(results);
+  renderQuant(data);
   renderAlert(data);
   renderPredictions(data);
   renderPauses(data.pauses);
@@ -73,6 +77,52 @@ function renderRecovery(recovery, recoveryError) {
     .join("");
 }
 
+function renderQuant(data) {
+  const decision = data.decision || {};
+  const quant = data.quant;
+  const badge = document.querySelector("#decision-state");
+  if (!badge) return;
+  const status = decision.status || "SIN VENTAJA";
+  badge.textContent = status;
+  badge.className = `alert-badge ${decision.signals_allowed ? "active" : "idle"}`;
+  const errorBox = document.querySelector("#quant-error");
+  errorBox.textContent = data.quant_error || "";
+  errorBox.classList.toggle("hidden", !data.quant_error);
+  document.querySelector("#quant-mode").textContent = decision.trading_mode === "live" ? "real" : "paper-trading";
+  document.querySelector("#quant-reasons").innerHTML = (decision.reasons || [])
+    .map((reason) => `<li>${escapeHtml(reason)}</li>`)
+    .join("");
+  if (!quant) return;
+  const ds = quant.dataset || {};
+  const age = quant.generated_at ? Math.round((Date.now() - new Date(quant.generated_at).getTime()) / 60000) : null;
+  document.querySelector("#quant-null").textContent = `Hipótesis nula: ${quant.null_hypothesis}.`;
+  document.querySelector("#quant-data").textContent =
+    `${ds.rows} sorteos · ${ds.missing_draws} ausentes · informe hace ${age === null ? "-" : age} min`;
+  const model = quant.selected_model || {};
+  document.querySelector("#quant-model").textContent = `${model.name} · λ=${Number(quant.recalibration_lambda).toFixed(3)}`;
+  const test = quant.test || {};
+  const dm = quant.diebold_mariano || {};
+  document.querySelector("#quant-logloss").textContent =
+    `${Number(test.log_loss).toFixed(4)} vs ${Number(test.log_loss_uniform).toFixed(4)} (p=${fmtP(dm.p_value)})`;
+  const binom = quant.top1_binomial_test || {};
+  document.querySelector("#quant-top1").textContent =
+    `${percent(test.top1)} vs ${percent(test.baseline_top1)} (p=${fmtP(binom.p_value)}, n=${test.n})`;
+  document.querySelector("#quant-ece").textContent = Number(test.ece_top_label).toFixed(4);
+  document.querySelector("#quant-tests").innerHTML = (quant.goodness_of_fit || [])
+    .map((t) => `<tr><td>${escapeHtml(t.name)}</td><td>${Number(t.statistic).toFixed(3)}</td><td>${isBlank(t.df) ? "-" : t.df}</td>
+      <td>${fmtP(t.p_value)}</td><td>${fmtP(t.p_value_holm)}</td><td>${t.reject_holm ? "sí" : "no"}</td></tr>`)
+    .join("");
+  const mc = quant.monte_carlo || {};
+  const bank = mc.bankroll_null_1pct || {};
+  document.querySelector("#quant-mc").textContent =
+    `Monte Carlo: p nula log-loss=${fmtP(mc.null_log_loss_p_value)} · p nula top-1=${fmtP(mc.null_top1_p_value)} · ` +
+    `apostando 1% bajo la nula: ROI mediano ${percent(bank.roi_q50 || 0)}, drawdown q95 ${percent(bank.max_drawdown_q95 || 0)}. ` +
+    `${quant.goodness_interpretation || ""}`;
+  const prng = quant.prng || {};
+  document.querySelector("#quant-prng").textContent =
+    `PRNG: ${prng.verdict || "-"} · ` + (prng.hypotheses || []).map((h) => `${h.generator}: ${h.status}`).join(" · ");
+}
+
 function renderResults(results) {
   document.querySelector("#results-body").innerHTML = results
     .map((row) => `<tr><td>${row.Fecha}</td><td>${row.Hora}</td><td>${row.No_Sorteo}</td><td><b>${number(row.Numero)}</b></td></tr>`)
@@ -103,7 +153,8 @@ function renderAlert(data) {
 
   const stats = data.alert_stats || {};
   const fired = Boolean(alert.fired);
-  badge.textContent = fired ? "SEÑAL ACTIVA" : "SIN SEÑAL";
+  const blocked = Boolean(alert.signal_blocked);
+  badge.textContent = fired ? "SEÑAL ACTIVA" : blocked ? "SIN VENTAJA" : "SIN SEÑAL";
   badge.className = `alert-badge ${fired ? "active" : "idle"}`;
 
   document.querySelector("#alert-number").textContent = isBlank(alert.number) ? "00" : number(alert.number);
@@ -116,8 +167,13 @@ function renderAlert(data) {
   if (alert.source_draw) details.push(`base ${alert.source_draw}`);
   document.querySelector("#alert-detail").textContent = details.join(" · ");
 
-  document.querySelector("#alert-failures").innerHTML = (alert.failures || [])
-    .map((item) => `<li>${item}</li>`)
+  const failures = (alert.failures || []).slice();
+  if (blocked) {
+    if (alert.rule_fired) failures.unshift("La regla M4 se cumplió, pero la señal está bloqueada (registro sólo en papel).");
+    (alert.block_reasons || []).forEach((reason) => failures.push(`Bloqueo: ${reason}`));
+  }
+  document.querySelector("#alert-failures").innerHTML = failures
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
     .join("");
 
   const applied = Boolean(alert.stake_applied);
@@ -179,10 +235,11 @@ function renderPredictions(data) {
         : prediction.matched === "markov"
         ? "Markov"
         : "Heurístico";
+      const signalsAllowed = Boolean(data.decision && data.decision.signals_allowed);
       const alert = !prediction.alert_fired
         ? "—"
         : isBlank(prediction.alert_hit)
-        ? "Activa"
+        ? signalsAllowed ? "Activa" : "Regla cumplida (papel)"
         : prediction.alert_hit
         ? "Acierto"
         : "Fallo";

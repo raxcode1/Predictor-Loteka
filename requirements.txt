@@ -2,4 +2,6 @@ flask
 gunicorn
 pandas
 numpy
+scipy
+scikit-learn
 z3-solver

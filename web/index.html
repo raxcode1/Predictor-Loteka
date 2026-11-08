@@ -65,6 +65,37 @@
         </table>
       </div>
     </section>
+    <section class="panel quant-panel">
+      <div class="panel-heading">
+        <h2>Validación cuantitativa · fuera de muestra</h2>
+        <span id="decision-state" class="alert-badge idle">SIN VENTAJA</span>
+      </div>
+      <div id="quant-error" class="alert hidden"></div>
+      <p class="muted" id="quant-null">Hipótesis nula: resultados i.i.d. uniformes en 0..18 (1/19).</p>
+      <div class="metrics">
+        <div><span>Datos</span><strong id="quant-data">-</strong></div>
+        <div><span>Modelo activo</span><strong id="quant-model">-</strong></div>
+        <div><span>Modo</span><strong id="quant-mode">-</strong></div>
+      </div>
+      <div class="metrics">
+        <div><span>Log-loss test</span><strong id="quant-logloss">-</strong></div>
+        <div><span>Top-1 test</span><strong id="quant-top1">-</strong></div>
+        <div><span>Calibración (ECE)</span><strong id="quant-ece">-</strong></div>
+      </div>
+      <h3>Motivo de abstención</h3>
+      <ul class="failures" id="quant-reasons"></ul>
+      <details class="predictions-details">
+        <summary class="muted">Tests de ajuste, Bayes, Monte Carlo y PRNG</summary>
+        <div class="table-wrap">
+          <table class="compact">
+            <thead><tr><th>Test</th><th>Estadístico</th><th>gl</th><th>p</th><th>p Holm</th><th>Rechaza</th></tr></thead>
+            <tbody id="quant-tests"></tbody>
+          </table>
+        </div>
+        <p class="muted" id="quant-mc"></p>
+        <p class="muted" id="quant-prng"></p>
+      </details>
+    </section>
     <section class="panel alert-panel">
       <div class="panel-heading">
         <h2>Alerta M4 · cuándo entrar</h2>
@@ -120,7 +151,7 @@
         </table>
       </div>
     </section>
-    <p class="disclaimer">El análisis es estadístico y no garantiza el siguiente resultado. La alerta M4 opera en modo papel: sólo se dimensiona un stake cuando la evidencia acumulada lo respalda.</p>
+    <p class="disclaimer">El análisis es estadístico y no garantiza el siguiente resultado. El sistema opera en modo paper-trading por defecto y responde «SIN VENTAJA» mientras la evidencia fuera de muestra no supere la línea base de forma robusta.</p>
   </main>
   <script src="/app.js"></script>
 </body>

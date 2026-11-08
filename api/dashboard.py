@@ -21,6 +21,7 @@ except ImportError:
 from config_sync import INTERVALO_SINCRONIZACION
 from live_monitor import LiveMonitor, json_file_store, memory_store
 from m4_engine.kelly import KellyConfig
+from quant import integration as quant_integration
 from sync_ruleta_express import (
     backfill_missing_draws,
     extract_results,
@@ -368,7 +369,7 @@ def dashboard() -> dict:
 
     predictions = monitor_payload.get("predictions", [])
 
-    return {
+    payload = {
         "results": rows,
         "last_sync": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "sync_error": error,
@@ -384,6 +385,9 @@ def dashboard() -> dict:
         "refresh_interval_seconds": INTERVALO_SINCRONIZACION,
         "horario": horario,
     }
+    # Análisis cuantitativo, decisión (SIN VENTAJA por defecto) y puerta de
+    # señales; el informe se cachea por hash del dataset.
+    return quant_integration.attach(payload, rows=rows)
 
 
 class Handler(BaseHTTPRequestHandler):

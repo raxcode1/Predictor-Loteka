@@ -19,6 +19,7 @@ import horario_loteka
 from config_sync import INTERVALO_SINCRONIZACION, descripcion
 from live_monitor import LiveMonitor, json_file_store
 from m4_engine.kelly import KellyConfig
+from quant import integration as quant_integration
 from sync_ruleta_express import CSV_PATH, run_once
 
 
@@ -38,6 +39,8 @@ class DashboardState:
         self.recovery: dict | None = None
         self.recovery_error: str | None = None
         self.monitor_error: str | None = None
+        self.quant: dict | None = None
+        self.quant_error: str | None = "informe cuantitativo pendiente de cálculo"
         self.monitor = LiveMonitor(
             *json_file_store(REGISTRO_PATH),
             spec=config_alertas.spec(),
@@ -59,6 +62,13 @@ class DashboardState:
             self.recovery = recovery
             self.recovery_error = None
 
+    def update_quant(self) -> None:
+        """Recalcula el informe cuantitativo (cacheado por hash del dataset)."""
+        summary, error = quant_integration.analysis_for_rows(read_results())
+        with self.lock:
+            self.quant = summary
+            self.quant_error = error
+
     def update_monitor(self) -> None:
         """Actualiza el registro vivo de predicciones y la alerta M4."""
         with self.lock:
@@ -78,7 +88,26 @@ class DashboardState:
                 "horario": horario_loteka.estado(),
             }
             payload.update(self.monitor.payload())
-            return payload
+            return quant_integration.attach(
+                payload, summary=self.quant, error=self.quant_error
+            )
+
+    def analysis(self) -> dict:
+        with self.lock:
+            return {
+                "api_version": quant_integration.API_VERSION,
+                "quant": self.quant,
+                "quant_error": self.quant_error,
+            }
+
+    def readiness(self) -> tuple[bool, dict]:
+        with self.lock:
+            checks = {
+                "csv": CSV_PATH.exists(),
+                "monitor": self.monitor_error is None,
+                "quant": self.quant is not None,
+            }
+        return all(checks.values()), checks
 
 
 def read_results() -> list[dict[str, str]]:
@@ -134,6 +163,7 @@ def sync_loop(state: DashboardState) -> None:
                 except Exception as error:
                     with state.lock:
                         state.monitor_error = str(error)
+                state.update_quant()
         except Exception as error:
             with state.lock:
                 state.sync_error = str(error)
@@ -149,6 +179,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         if path == "/api/dashboard":
             self.send_json(self.state.snapshot())
             return
+        if path == "/api/v2/analysis":
+            self.send_json(self.state.analysis())
+            return
+        if path == "/healthz":
+            self.send_json({"ok": True})
+            return
+        if path == "/readyz":
+            ready, checks = self.state.readiness()
+            self.send_json(
+                {"ready": ready, "checks": checks},
+                HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
         if path == "/" or path == "/index.html":
             self.send_file(WEB_PATH / "index.html", "text/html; charset=utf-8")
             return
@@ -160,9 +203,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 
-    def send_json(self, payload: dict) -> None:
+    def send_json(self, payload: dict, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(HTTPStatus.OK)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
@@ -203,6 +246,7 @@ def main() -> None:
         state.update_monitor()
     except Exception as error:
         state.monitor_error = str(error)
+    state.update_quant()
 
     RequestHandler.state = state
     ThreadingHTTPServer.allow_reuse_address = True

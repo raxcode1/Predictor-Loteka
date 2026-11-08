@@ -30,6 +30,8 @@ else:
 if not URL.endswith("/"):
     URL = URL + "/"
 TIME_ZONE = ZoneInfo("America/Santo_Domingo")
+#: CSV histórico del proyecto (lo importa web_app.py).
+CSV_PATH = Path(__file__).with_name("Resultados_RuletaExpress.csv")
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 
 #: Sólo se intentan rellenar huecos de las últimas jornadas. Los huecos
@@ -372,7 +374,7 @@ def main() -> None:
     parser.add_argument(
         "--path",
         type=Path,
-        default=Path(__file__).with_name("Resultados_RuletaExpress.csv"),
+        default=CSV_PATH,
         help="Ruta del CSV que se actualizará (por defecto el histórico del proyecto).",
     )
     parser.add_argument(
