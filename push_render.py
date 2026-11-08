@@ -106,7 +106,18 @@ def sincronizar(
     respuesta = enviar(url, token, filas if completo else nuevas, full=completo)
 
     recibido = int(respuesta.get("rows", 0) or 0)
-    if recibido < len(filas) and ENVIAR_COMPLETO_AL_REINICIAR:
+    # Si el servicio no tiene el mismo conjunto de sorteos (por ejemplo, le
+    # faltan sorteos intermedios que el PC recuperó después), el conteo de
+    # filas puede coincidir aunque los datos difieran. La huella lo detecta y
+    # fuerza un envío completo; sin esto el hueco queda en el servidor y el
+    # panel lo muestra como «sorteos no evaluados» para siempre.
+    huella_local = f"{len(filas)}:{sum(draw_number(r.get('No_Sorteo', '')) for r in filas if draw_number(r.get('No_Sorteo', '')) >= 0)}"
+    huella_servidor = respuesta.get("fingerprint")
+    desajuste = (
+        (huella_servidor is not None and huella_servidor != huella_local)
+        or recibido < len(filas)
+    )
+    if desajuste and not completo and ENVIAR_COMPLETO_AL_REINICIAR:
         # El servicio no tiene todos los datos (se reinició o perdió el
         # estado): se reenvía el histórico completo.
         respuesta = enviar(url, token, filas, full=True)

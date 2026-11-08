@@ -47,6 +47,9 @@ LOTTEKA_URL = f"{CLOUDFLARE_WORKER_URL}/" if CLOUDFLARE_WORKER_URL else "https:/
 CSV_NAME = "Resultados_RuletaExpress.csv"
 EXPECTED_COLUMNS = ["Fecha", "Hora", "No_Sorteo", "Numero"]
 
+ROOT = Path(__file__).resolve().parent
+WEB_PATH = ROOT / "web"
+
 DATA_DIR = os.environ.get("RENDER_DATA_DIR", "").strip()
 PUSH_TOKEN = os.environ.get("PUSH_TOKEN", "").strip()
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "1").strip() not in ("0", "false", "False", "")
@@ -60,6 +63,17 @@ def draw_number(draw: str) -> int:
         return int(str(draw).rsplit(" ", 1)[-1])
     except (TypeError, ValueError):
         return -1
+
+
+def huella(rows: list[dict[str, str]]) -> str:
+    """Identifica el conjunto de sorteos (cantidad + suma de identificadores).
+
+    Sirve para detectar huecos intermedios: dos históricos pueden tener el
+    mismo número de filas y aun así no contener los mismos sorteos. Si la
+    huella del servidor difiere de la local, el PC reenvía todo el histórico.
+    """
+    numeros = [draw_number(row.get("No_Sorteo", "")) for row in rows if row.get("No_Sorteo")]
+    return f"{len(numeros)}:{sum(n for n in numeros if n >= 0)}"
 
 
 def leer_csv(path: Path) -> list[dict[str, str]]:
@@ -183,6 +197,7 @@ class Estado:
                 "ok": True,
                 "rows": len(self.rows),
                 "last_draw": self.rows[0]["No_Sorteo"] if self.rows else None,
+                "fingerprint": huella(self.rows),
             }
 
     def actualizar_recovery(self) -> None:

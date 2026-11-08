@@ -128,6 +128,15 @@ def fetch_history_date(day: date) -> list[dict[str, str]]:
     )
     with urlopen(request, timeout=30) as response:
         html = response.read().decode("utf-8", errors="replace")
+    # La portada trae la sección en vivo (result-chanceexpress2) y la variable
+    # fechaServidor; el histórico diario no. Si el proxy devuelve la portada
+    # en lugar del día solicitado, se descarta: de lo contrario se asignarían
+    # fechas equivocadas a sorteos recientes y se crearían huecos falsos.
+    if "result-chanceexpress2" in html or "fechaServidor" in html:
+        raise RuntimeError(
+            "El proxy devolvió la portada en vez del histórico diario. "
+            "Actualiza el Cloudflare Worker para que reenvíe ruta y query."
+        )
     historical = []
     historical_pattern = re.compile(
         r'<li[^>]*>.*?'
