@@ -52,9 +52,13 @@ EUROPEAN_37 = PayoutModel("european37", pockets=37, net_multiplier=35.0)
 #: Hipótesis coherente con el espacio de resultados observado (0..18).
 EXPRESS_19 = PayoutModel("express19", pockets=19, net_multiplier=18.0)
 
+#: Pago real de Loteka: 180 en total por cada 10 apostados (17:1 neto).
+LOTEKA_180 = PayoutModel("loteka180", pockets=19, net_multiplier=17.0)
+
 PAYOUT_MODELS: dict[str, PayoutModel] = {
     EUROPEAN_37.name: EUROPEAN_37,
     EXPRESS_19.name: EXPRESS_19,
+    LOTEKA_180.name: LOTEKA_180,
 }
 
 

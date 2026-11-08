@@ -106,7 +106,7 @@ function renderQuant(data) {
     `${Number(test.log_loss).toFixed(4)} vs ${Number(test.log_loss_uniform).toFixed(4)} (p=${fmtP(dm.p_value)})`;
   const binom = quant.top1_binomial_test || {};
   document.querySelector("#quant-top1").textContent =
-    `${percent(test.top1)} vs ${percent(test.baseline_top1)} (p=${fmtP(binom.p_value)}, n=${test.n})`;
+    `${percent(test.top1)} vs azar ${percent(test.baseline_top1)} · break-even ${percent(quant.break_even || 0)} (p=${fmtP(binom.p_value)}, n=${test.n})`;
   document.querySelector("#quant-ece").textContent = Number(test.ece_top_label).toFixed(4);
   document.querySelector("#quant-tests").innerHTML = (quant.goodness_of_fit || [])
     .map((t) => `<tr><td>${escapeHtml(t.name)}</td><td>${Number(t.statistic).toFixed(3)}</td><td>${isBlank(t.df) ? "-" : t.df}</td>

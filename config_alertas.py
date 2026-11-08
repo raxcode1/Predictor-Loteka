@@ -11,13 +11,14 @@ Cuantitativa» con la corrección que impose el espacio real de resultados
 
 from __future__ import annotations
 
-from m4_engine.config import EUROPEAN_37, EXPRESS_19, StrategySpec
+from m4_engine.config import EUROPEAN_37, EXPRESS_19, LOTEKA_180, StrategySpec
 
 #: Capital de referencia, en unidades, para dimensionar el stake del alert engine.
 BANCO_INICIAL = 1000.0
 
-#: Modelo de pago del stake: 'express19' (0..18, 18:1) o 'european37' (PDF).
-MODELO_PAGO = "express19"
+#: Modelo de pago del stake: 'loteka180' (pago real: 180 en total por cada
+#: 10 apostados, 17:1 neto), 'express19' (18:1 teórico) o 'european37' (PDF).
+MODELO_PAGO = "loteka180"
 
 #: Lectura del aislamiento de modelo: 'any' | 'tie' | 'strict'.
 MODO_PRIMARIO = "any"
@@ -50,6 +51,7 @@ ACIERTO_MINIMO = 4
 
 #: Modelos de pago disponibles para el dimensionamiento del stake.
 MODELOS_PAGO = {
+    "loteka180": LOTEKA_180,
     "express19": EXPRESS_19,
     "european37": EUROPEAN_37,
 }

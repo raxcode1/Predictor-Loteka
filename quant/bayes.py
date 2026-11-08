@@ -78,9 +78,10 @@ def beta_binomial_posterior(
 def prior_sensitivity(
     hits: int, trials: int, threshold: float = BASELINE, credibility: float = 0.95
 ) -> list[dict[str, Any]]:
+    """Posterior bajo cada prior; el escéptico se centra en la nula (1/19)."""
     return [
         beta_binomial_posterior(hits, trials, prior, threshold, credibility)
-        for prior in standard_priors(threshold)
+        for prior in standard_priors(BASELINE)
     ]
 
 

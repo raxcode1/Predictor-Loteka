@@ -23,4 +23,11 @@ PIPELINE_VERSION = "quant-1.0.0"
 OUTPUT_MODULUS = 19
 BASELINE = 1.0 / OUTPUT_MODULUS
 
-__all__ = ["BASELINE", "OUTPUT_MODULUS", "PIPELINE_VERSION"]
+#: Pago real de Loteka: 180 pesos en total por cada 10 apostados (incluye la
+#: apuesta), es decir, 17 a 1 neto. Break-even = 10 / 180 = 5,56 %.
+NET_MULTIPLIER = 17.0
+BREAK_EVEN = 1.0 / (1.0 + NET_MULTIPLIER)
+#: Apuesta mínima admitida por Loteka (pesos).
+MIN_BET = 10.0
+
+__all__ = ["BASELINE", "BREAK_EVEN", "MIN_BET", "NET_MULTIPLIER", "OUTPUT_MODULUS", "PIPELINE_VERSION"]

@@ -12,6 +12,7 @@ import numpy as np
 
 from . import (
     BASELINE,
+    NET_MULTIPLIER,
     OUTPUT_MODULUS,
     PIPELINE_VERSION,
     bayes,
@@ -37,7 +38,7 @@ def build_report(
     mc_sims: int = 1000,
     run_prng_solver: bool = False,
     prng_kwargs: dict[str, Any] | None = None,
-    net_multiplier: float = 18.0,
+    net_multiplier: float = NET_MULTIPLIER,
     mode: str | None = None,
 ) -> dict[str, Any]:
     """Informe completo. Lanza ValueError si el histórico es insuficiente."""
@@ -56,7 +57,9 @@ def build_report(
     bayesian = {
         "frequency_posterior_alpha1": bayes.dirichlet_frequency_posterior(counts, 1.0),
         "bayes_factors": bayes.bayes_factor_sensitivity(counts, transitions),
-        "top1_hit_rate_prior_sensitivity": bayes.prior_sensitivity(raw["top1_hits"], raw["n"], BASELINE),
+        "top1_hit_rate_prior_sensitivity": bayes.prior_sensitivity(
+            raw["top1_hits"], raw["n"], 1.0 / (1.0 + net_multiplier)
+        ),
     }
 
     selected = ModelSpec(
@@ -139,6 +142,8 @@ def summarize(report: dict[str, Any]) -> dict[str, Any]:
         "generated_at": report["generated_at"],
         "seed": report["seed"],
         "null_hypothesis": report["null_hypothesis"],
+        "break_even": report["break_even"],
+        "net_multiplier": report["net_multiplier"],
         "dataset": report["dataset"],
         "partition": wf["partition"],
         "selected_model": wf["selected_model"],

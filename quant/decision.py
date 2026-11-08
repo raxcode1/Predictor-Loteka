@@ -18,7 +18,7 @@ from typing import Any
 
 from scipy import stats
 
-from . import BASELINE, PIPELINE_VERSION
+from . import BASELINE, BREAK_EVEN, NET_MULTIPLIER, PIPELINE_VERSION
 from .bayes import BetaPrior, beta_binomial_posterior
 from .integration import MODE_LIVE, MODE_PAPER, STATUS_NO_EDGE, trading_mode
 from .validation import holm
@@ -47,7 +47,7 @@ class DecisionConfig:
     max_ece_top_label: float = 0.02
     min_posterior_prob: float = 0.95
     skeptical_prior_strength: float = 200.0
-    break_even: float = BASELINE
+    break_even: float = BREAK_EVEN
     min_alerts: int = 200
 
 
@@ -73,11 +73,12 @@ def _check(name: str, passed: bool, value: Any, threshold: Any, detail: str = ""
 
 
 def _skeptical(config: DecisionConfig) -> BetaPrior:
+    # El escéptico cree que el juego es aleatorio: prior centrado en 1/19.
     strength = config.skeptical_prior_strength
     return BetaPrior(
-        f"escéptico n0={strength:g}",
-        config.break_even * strength,
-        (1.0 - config.break_even) * strength,
+        f"escéptico centrado en 1/19, n0={strength:g}",
+        BASELINE * strength,
+        (1.0 - BASELINE) * strength,
     )
 
 
@@ -93,7 +94,7 @@ def decide(
     config: DecisionConfig | None = None,
     limits: RiskLimits | None = None,
     mode: str | None = None,
-    net_multiplier: float = 18.0,
+    net_multiplier: float = NET_MULTIPLIER,
 ) -> dict[str, Any]:
     """Decisión auditable a partir del informe cuantitativo."""
     config = config or DecisionConfig()
