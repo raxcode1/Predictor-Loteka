@@ -1,6 +1,6 @@
 # Informe cuantitativo Ruleta Express
 
-- Pipeline: `quant-1.0.0` · generado 2026-11-08T15:10:29+00:00 · semilla 20261108
+- Pipeline: `quant-1.0.0` · generado 2026-11-08T15:31:00+00:00 · semilla 20261108
 - Dataset SHA-256: `d5367c6961a1c3cc580c60c39f7e04b7ae9cfb20dbb0ffe5a593f1dac144230e`
 - Periodo: sorteos 219640–253154 (27/05/2026 → 07/11/2026), 33181 filas, 334 sorteos ausentes, 33159 transiciones consecutivas
 - Hipótesis nula: resultados i.i.d. uniformes en 0..18 (P = 1/19)
@@ -12,8 +12,8 @@
 - ✔ `log_loss_test_vs_uniforme`: 1.7465567910961661e-13 (umbral p < 0.01)
 - ✔ `estabilidad_walk_forward`: 5 (umbral >= 4 bloques)
 - ✔ `calibracion_ece`: 0.011441484287927411 (umbral <= 0.02)
-- ✘ `posterior_top1_sobre_break_even`: 0.9356328723871845 (umbral >= 0.95)
-- ✘ `limite_inferior_credible`: 0.051463713978049594 (umbral > 0.0526)
+- ✘ `posterior_top1_sobre_break_even`: 0.6707043237153134 (umbral >= 0.95)
+- ✘ `limite_inferior_credible`: 0.051463713978049594 (umbral > 0.0556)
 
 ## Particiones (cronológicas, bloqueadas)
 
@@ -93,16 +93,16 @@ Se rechaza la nula en: chi2_frecuencias_uniformes, chi2_independencia_lag1, chi2
 - α=0.5: log BF(frecuencias vs uniforme) = -55.703; log BF(Markov-1 vs iid) = 172.654
 - α=1.0: log BF(frecuencias vs uniforme) = -48.103; log BF(Markov-1 vs iid) = 300.101
 - α=10.0: log BF(frecuencias vs uniforme) = -26.154; log BF(Markov-1 vs iid) = 551.352
-- top-1 test, prior uniforme Beta(1,1): media 0.0571, IC95 [0.0516, 0.0628], P(>1/19) = 0.944
-- top-1 test, prior Jeffreys Beta(0.5,0.5): media 0.0570, IC95 [0.0516, 0.0627], P(>1/19) = 0.941
-- top-1 test, prior escéptico Beta centrado en 0.0526 (n0=200): media 0.0568, IC95 [0.0515, 0.0624], P(>1/19) = 0.936
+- top-1 test, prior uniforme Beta(1,1): media 0.0571, IC95 [0.0516, 0.0628], P(>1/19) = 0.701
+- top-1 test, prior Jeffreys Beta(0.5,0.5): media 0.0570, IC95 [0.0516, 0.0627], P(>1/19) = 0.693
+- top-1 test, prior escéptico Beta centrado en 0.0526 (n0=200): media 0.0568, IC95 [0.0515, 0.0624], P(>1/19) = 0.671
 
 ## Monte Carlo
 
 - Nula, mejora de log-loss: p = 0.0005 (2000 sims)
 - Nula, aciertos top-1: p = 0.0598
-- Bankroll 1%/ronda bajo nula: ROI mediano -52.55%, drawdown máx. q95 96.12%, P(ruina 50%) 78.50%
-- Bankroll 1%/ronda bajo posterior escéptico: ROI mediano -4.22%, P(beneficio) 45.10%
+- Bankroll 1%/ronda bajo nula: ROI mediano -69.77%, drawdown máx. q95 97.08%, P(ruina 50%) 86.45%
+- Bankroll 1%/ronda bajo posterior escéptico: ROI mediano -41.04%, P(beneficio) 31.25%
 
 ## PRNG
 

@@ -1,11 +1,11 @@
 {
   "pipeline_version": "quant-1.0.0",
-  "generated_at": "2026-11-08T15:10:29+00:00",
+  "generated_at": "2026-11-08T15:31:00+00:00",
   "seed": 20261108,
   "null_hypothesis": "resultados i.i.d. uniformes en 0..18 (P = 1/19)",
   "baseline": 0.05263157894736842,
-  "break_even": 0.05263157894736842,
-  "net_multiplier": 18.0,
+  "break_even": 0.05555555555555555,
+  "net_multiplier": 17.0,
   "dataset": {
     "rows": 33181,
     "first_draw": 219640,
@@ -1355,8 +1355,8 @@
           0.06279245332708165
         ],
         "credibility": 0.95,
-        "threshold": 0.05263157894736842,
-        "prob_above_threshold": 0.9439733161879988
+        "threshold": 0.05555555555555555,
+        "prob_above_threshold": 0.7008059707628885
       },
       {
         "prior": "Jeffreys Beta(0.5,0.5)",
@@ -1372,8 +1372,8 @@
           0.06272312155739126
         ],
         "credibility": 0.95,
-        "threshold": 0.05263157894736842,
-        "prob_above_threshold": 0.9412280633274095
+        "threshold": 0.05555555555555555,
+        "prob_above_threshold": 0.6925649428111548
       },
       {
         "prior": "escéptico Beta centrado en 0.0526 (n0=200)",
@@ -1389,8 +1389,8 @@
           0.06243586145127762
         ],
         "credibility": 0.95,
-        "threshold": 0.05263157894736842,
-        "prob_above_threshold": 0.9356328723871845
+        "threshold": 0.05555555555555555,
+        "prob_above_threshold": 0.6707043237153134
       }
     ]
   },
@@ -1421,39 +1421,39 @@
       "seed": 20261110,
       "n_bets": 1000,
       "stake_fraction": 0.01,
-      "net_multiplier": 18.0,
+      "net_multiplier": 17.0,
       "hit_rate": 0.05263157894736842,
       "posterior": null,
-      "roi_mean": -0.039325302537011275,
-      "roi_q05": -0.9422816485087734,
-      "roi_q50": -0.5254568911509723,
-      "roi_q95": 2.2733361810988084,
-      "max_drawdown_median": 0.8229622650105612,
-      "max_drawdown_q95": 0.9612128904592074,
+      "roi_mean": -0.42834241746142543,
+      "roi_q05": -0.959283358266793,
+      "roi_q50": -0.6977405022086484,
+      "roi_q95": 0.8986166934676061,
+      "max_drawdown_median": 0.861484000351645,
+      "max_drawdown_q95": 0.9708478482265204,
       "ruin_level": 0.5,
-      "ruin_probability": 0.785,
-      "prob_profit": 0.2455
+      "ruin_probability": 0.8645,
+      "prob_profit": 0.131
     },
     "bankroll_posterior_1pct": {
       "sims": 2000,
       "seed": 20261111,
       "n_bets": 1000,
       "stake_fraction": 0.01,
-      "net_multiplier": 18.0,
+      "net_multiplier": 17.0,
       "hit_rate": null,
       "posterior": [
         388.5263157894737,
         6448.473684210527
       ],
-      "roi_mean": 1.5421798673439144,
-      "roi_q05": -0.8835066406167429,
-      "roi_q50": -0.04222626783786787,
-      "roi_q95": 8.385804137826037,
-      "max_drawdown_median": 0.7630074687484183,
-      "max_drawdown_q95": 0.9420797327256049,
+      "roi_mean": 0.42151124493028713,
+      "roi_q05": -0.9205718185545986,
+      "roi_q50": -0.4103658550359408,
+      "roi_q95": 4.1729859392816095,
+      "max_drawdown_median": 0.799906521389796,
+      "max_drawdown_q95": 0.9562564669301921,
       "ruin_level": 0.5,
-      "ruin_probability": 0.609,
-      "prob_profit": 0.451
+      "ruin_probability": 0.72,
+      "prob_profit": 0.3125
     },
     "note": "Simulación de variabilidad bajo supuestos; no es evidencia causal."
   },
@@ -1487,7 +1487,7 @@
           "unsat": 57,
           "unknown": 87
         },
-        "elapsed_seconds": 413.718,
+        "elapsed_seconds": 380.469,
         "bonferroni_chance_probability": 4.99234829766361e-19,
         "candidates": [],
         "stopped_reason": null,
@@ -1553,10 +1553,10 @@
     "pipeline_version": "quant-1.0.0",
     "data_sha256": "d5367c6961a1c3cc580c60c39f7e04b7ae9cfb20dbb0ffe5a593f1dac144230e",
     "data_last_draw": 253154,
-    "generated_at": "2026-11-08T15:10:29+00:00",
+    "generated_at": "2026-11-08T15:31:00+00:00",
     "sample_size": 6637,
     "p_value": 1.7465567910961661e-13,
-    "posterior_prob_above_break_even": 0.9356328723871845,
+    "posterior_prob_above_break_even": 0.6707043237153134,
     "credible_interval": [
       0.051463713978049594,
       0.06243586145127762
@@ -1600,7 +1600,7 @@
       {
         "name": "posterior_top1_sobre_break_even",
         "passed": false,
-        "value": 0.9356328723871845,
+        "value": 0.6707043237153134,
         "threshold": ">= 0.95",
         "detail": ""
       },
@@ -1608,13 +1608,13 @@
         "name": "limite_inferior_credible",
         "passed": false,
         "value": 0.051463713978049594,
-        "threshold": "> 0.0526",
+        "threshold": "> 0.0556",
         "detail": ""
       }
     ],
     "reasons": [
-      "posterior_top1_sobre_break_even: 0.9356328723871845 (umbral >= 0.95)",
-      "limite_inferior_credible: 0.051463713978049594 (umbral > 0.0526)"
+      "posterior_top1_sobre_break_even: 0.6707043237153134 (umbral >= 0.95)",
+      "limite_inferior_credible: 0.051463713978049594 (umbral > 0.0556)"
     ],
     "abstain": true,
     "risk_limits": {
@@ -1630,9 +1630,9 @@
       "max_ece_top_label": 0.02,
       "min_posterior_prob": 0.95,
       "skeptical_prior_strength": 200.0,
-      "break_even": 0.05263157894736842,
+      "break_even": 0.05555555555555555,
       "min_alerts": 200
     }
   },
-  "elapsed_seconds": 415.141
+  "elapsed_seconds": 381.703
 }
