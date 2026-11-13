@@ -55,4 +55,14 @@ for (const file of ['cloudflare-worker-loteka.js', 'worker.js']) {
     );
     assert.equal(denied.headers.get('Access-Control-Allow-Origin'), null);
   });
+
+  test(`${file}: el cron llama a CRON_URL con el secreto y calla si falta`, async () => {
+    const worker = await loadWorker(file);
+    const calls = stubFetch();
+    await worker.scheduled({}, {}, {});
+    assert.equal(calls.length, 0);
+    await worker.scheduled({}, { CRON_URL: 'https://app.example/api/cron', CRON_SECRET: 's3' }, {});
+    assert.equal(calls[0].url, 'https://app.example/api/cron');
+    assert.equal(calls[0].init.headers.Authorization, 'Bearer s3');
+  });
 }

@@ -19,6 +19,18 @@ export function corsOrigin(request, env) {
 }
 
 export default {
+  // Latido sin sesiones: el Cron Trigger llama al panel para que sincronice y
+  // registre la predicción en papel aunque nadie tenga la web abierta.
+  // Requiere las variables CRON_URL (https://tu-app.vercel.app/api/cron) y
+  // CRON_SECRET (la misma que en Vercel). Sin ellas no hace nada.
+  async scheduled(event, env, ctx) {
+    if (!env || !env.CRON_URL || !env.CRON_SECRET) return;
+    const latido = fetch(env.CRON_URL, {
+      headers: { Authorization: 'Bearer ' + env.CRON_SECRET, 'User-Agent': 'ruleta-express-cron' },
+    }).catch(() => null);
+    if (ctx && ctx.waitUntil) ctx.waitUntil(latido);
+    else await latido;
+  },
   async fetch(request, env, ctx) {
     const incoming = new URL(request.url);
     const targetUrl = new URL('https://loteka.com.do' + incoming.pathname + incoming.search);

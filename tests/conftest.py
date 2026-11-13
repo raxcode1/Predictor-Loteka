@@ -52,3 +52,9 @@ def uniform_values() -> np.ndarray:
 @pytest.fixture(scope="session")
 def dependent_values() -> np.ndarray:
     return markov_chain(6000, seed=7, sticky_next=0.25)
+
+
+@pytest.fixture(autouse=True)
+def _libro_papel_aislado(tmp_path, monkeypatch):
+    """Los tests nunca escriben en el registro_papel.csv real del repositorio."""
+    monkeypatch.setenv("PAPEL_DIR", str(tmp_path))

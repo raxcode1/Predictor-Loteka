@@ -21,6 +21,8 @@ except ImportError:
 from config_sync import INTERVALO_SINCRONIZACION
 from live_monitor import LiveMonitor, json_file_store, memory_store
 from m4_engine.kelly import KellyConfig
+from papel import registro as papel_registro
+from papel import web as papel_web
 from quant import integration as quant_integration
 from sync_ruleta_express import (
     backfill_missing_draws,
@@ -87,6 +89,52 @@ _cached_draw: str | None = None
 _cached_recovery: dict | None = None
 _monitor: LiveMonitor | None = None
 _last_csv_hash: str | None = None
+#: True cuando Supabase confirmó que el CSV no existe en el bucket (se perdió).
+_csv_remoto_ausente: bool = False
+
+
+def objeto_ausente(mensaje: str) -> bool:
+    """¿El error de Storage significa «ese objeto no existe»?
+
+    Un bucket inexistente, una ruta inválida o un fallo de red NO cuentan:
+    en esos casos no se debe restaurar nada, porque el archivo puede seguir
+    ahí y se pisaría con una copia más corta.
+    """
+    if "NoSuchBucket" in mensaje or "Bucket not found" in mensaje or "PGRST125" in mensaje:
+        return False
+    return "NoSuchKey" in mensaje or "Object not found" in mensaje or '"not_found"' in mensaje
+
+
+def almacen_papel():
+    """Libro del modo papel: Supabase si está configurado; si no, carpeta temporal."""
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        return papel_registro.AlmacenArchivos(Path(tempfile.gettempdir())), False
+
+    def leer(nombre: str) -> str | None:
+        try:
+            return blob_request("GET", nombre).decode("utf-8-sig")
+        except Exception as error:
+            if objeto_ausente(str(error)):
+                return None
+            raise
+
+    def guardar(nombre: str, texto: str) -> None:
+        tipo = "text/csv; charset=utf-8" if nombre.endswith(".csv") else "application/json; charset=utf-8"
+        blob_request("PUT", nombre, texto.encode("utf-8"), tipo)
+
+    return papel_registro.AlmacenRemoto(leer, guardar), True
+
+
+def restaurar_csv_perdido(rows: list[dict[str, str]]) -> str | None:
+    """Si el CSV desapareció del bucket, lo vuelve a subir. Devuelve un aviso o None."""
+    global _csv_remoto_ausente, _last_csv_hash
+    if not (_csv_remoto_ausente and rows and SUPABASE_URL and SUPABASE_KEY):
+        return None
+    payload_csv = serialize_rows(rows)
+    blob_request("PUT", "Resultados_RuletaExpress.csv", payload_csv, "text/csv; charset=utf-8")
+    _csv_remoto_ausente = False
+    _last_csv_hash = str(hash(payload_csv))
+    return f"Resultados_RuletaExpress.csv no estaba en Supabase: restaurado con {len(rows)} sorteos."
 
 
 def storage_object_url(pathname: str) -> str:
@@ -179,10 +227,13 @@ def read_rows() -> list[dict[str, str]]:
             local_rows = read_csv_bytes(LOCAL_CSV.read_bytes())
         except Exception:
             local_rows = []
+    global _csv_remoto_ausente
     try:
         remote_rows = read_csv_bytes(blob_request("GET", "Resultados_RuletaExpress.csv"))
-    except Exception:
+    except Exception as error:
+        _csv_remoto_ausente = objeto_ausente(str(error))
         return local_rows
+    _csv_remoto_ausente = False
     return merge_results(local_rows, remote_rows)
 
 
@@ -351,6 +402,14 @@ def dashboard() -> dict:
         except Exception as exception:
             error = str(exception)
 
+    storage_restaurado: list[str] = []
+    try:
+        aviso = restaurar_csv_perdido(rows)
+        if aviso:
+            storage_restaurado.append(aviso)
+    except Exception as exception:
+        error = error or f"No se pudo restaurar el CSV en Supabase: {exception}"
+
     recovery_error: str | None = None
     recovery = None
     try:
@@ -385,6 +444,17 @@ def dashboard() -> dict:
         "refresh_interval_seconds": INTERVALO_SINCRONIZACION,
         "horario": horario,
     }
+    # Modo papel (paquete `papel`): predicción registrada antes del sorteo.
+    try:
+        almacen, persistente = almacen_papel()
+        payload["papel"] = papel_web.panel(rows, almacen, persistente)
+        storage_restaurado.extend(
+            f"{nombre} no estaba en Supabase: restaurado desde el repositorio."
+            for nombre in payload["papel"].get("restaurados", [])
+        )
+    except Exception as exception:
+        payload["papel"] = {"error": str(exception)}
+    payload["storage_restaurado"] = storage_restaurado
     # Análisis cuantitativo, decisión (SIN VENTAJA por defecto) y puerta de
     # señales; el informe se cachea por hash del dataset.
     return quant_integration.attach(payload, rows=rows)

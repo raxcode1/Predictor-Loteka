@@ -37,6 +37,7 @@ function render(data) {
 
   renderRecovery(data.recovery, data.recovery_error);
   renderResults(results);
+  renderPapel(data);
   renderQuant(data);
   renderAlert(data);
   renderPredictions(data);
@@ -121,6 +122,50 @@ function renderQuant(data) {
   const prng = quant.prng || {};
   document.querySelector("#quant-prng").textContent =
     `PRNG: ${prng.verdict || "-"} · ` + (prng.hypotheses || []).map((h) => `${h.generator}: ${h.status}`).join(" · ");
+}
+
+function renderPapel(data) {
+  const papel = data.papel || {};
+  const badge = document.querySelector("#papel-state");
+  const errorBox = document.querySelector("#papel-error");
+  errorBox.classList.toggle("hidden", !papel.error);
+  errorBox.textContent = papel.error ? `Modo papel: ${papel.error}` : "";
+  document.querySelector("#papel-restaurado").textContent = (data.storage_restaurado || []).join(" · ");
+  if (papel.error || !papel.resumen) {
+    badge.textContent = "SIN DATOS";
+    badge.className = "alert-badge idle";
+    return;
+  }
+  const proxima = papel.proxima;
+  const apostar = Boolean(proxima) && proxima.apostar === "1";
+  badge.textContent = !papel.regimen_ok ? "RÉGIMEN ROTO" : apostar ? "APOSTABLE (PAPEL)" : "NO APOSTAR";
+  badge.className = `alert-badge ${apostar ? "active" : "idle"}`;
+  document.querySelector("#papel-number").textContent =
+    proxima && proxima.pick_regla !== "" ? number(proxima.pick_regla) : "-";
+  const detalle = [];
+  if (proxima) {
+    detalle.push(`Sorteo ${proxima.sorteo} · previsto ${proxima.hora_prevista}`);
+    if (proxima.pick_modelo !== "") detalle.push(`modelo: ${number(proxima.pick_modelo)} (p=${Number(proxima.p_modelo).toFixed(4)})`);
+    if (proxima.tardia === "1") detalle.push("registrada tarde: no cuenta");
+    else if (proxima.en_ventana !== "1") detalle.push("fuera de la ventana diurna");
+  }
+  document.querySelector("#papel-detail").textContent = detalle.join(" · ") || "Sin predicción abierta.";
+  const ventana = papel.ventana ? `${papel.ventana[0]}–${papel.ventana[1]}` : "no reconocida";
+  document.querySelector("#papel-regimen").textContent =
+    `Ventana diurna: ${ventana} · ${papel.regimen_detalle}` + (papel.persistente ? "" : " · SIN SUPABASE: el registro no se conserva");
+  const r = papel.resumen;
+  const medida = (m) => (m && m.n ? `${m.aciertos}/${m.n} · ${percent(m.tasa)} · ROI ${(m.roi * 100).toFixed(1)}%` : "sin datos");
+  document.querySelector("#papel-regla").textContent = medida(r.regla);
+  document.querySelector("#papel-modelo").textContent = medida(r.modelo);
+  document.querySelector("#papel-control").textContent = medida(r.control);
+  document.querySelector("#papel-refs").textContent =
+    `Azar ${percent(r.azar)} · equilibrio a ${r.pago}x ${percent(r.equilibrio)}` +
+    (r.regla && r.regla.n ? ` · IC95% regla ${percent(r.regla.ic_bajo)}–${percent(r.regla.ic_alto)} · p(>equilibrio) ${fmtP(r.regla.p_equilibrio)}` : "");
+  document.querySelector("#papel-veredicto").textContent = r.veredicto;
+  const marca = (pick, ok) => (pick === "" ? "-" : `<span class="${ok === "1" ? "hit" : "miss"}">${number(pick)}</span>`);
+  document.querySelector("#papel-body").innerHTML = (papel.ultimas || [])
+    .map((f) => `<tr><td>${escapeHtml(f.sorteo)}</td><td>${escapeHtml(f.hora_prevista)}</td><td>${f.apostar === "1" ? "sí" : f.tardia === "1" ? "tardía" : "no"}</td><td>${marca(f.pick_regla, f.acierto_regla)}</td><td>${marca(f.pick_modelo, f.acierto_modelo)}</td><td>${number(f.resultado)}</td></tr>`)
+    .join("");
 }
 
 function renderResults(results) {

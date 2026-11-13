@@ -37,6 +37,8 @@ except ImportError:
 
 from live_monitor import LiveMonitor, json_file_store, memory_store
 from m4_engine.kelly import KellyConfig
+from papel import registro as papel_registro
+from papel import web as papel_web
 from quant import integration as quant_integration
 
 import os
@@ -242,6 +244,9 @@ class Estado:
                 "predictions_error": self.monitor_error,
                 "refresh_interval_seconds": REFRESH_SECONDS,
             }
+            # Modo papel: mismo bloque que en Vercel, con el libro en disco local.
+            payload["papel"] = papel_web.panel(payload["results"], papel_registro.AlmacenArchivos())
+            payload["storage_restaurado"] = []
             payload.update(self.monitor.payload())
             return quant_integration.attach(
                 payload, summary=self.quant, error=self.quant_error

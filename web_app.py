@@ -19,6 +19,8 @@ import horario_loteka
 from config_sync import INTERVALO_SINCRONIZACION, descripcion
 from live_monitor import LiveMonitor, json_file_store
 from m4_engine.kelly import KellyConfig
+from papel import registro as papel_registro
+from papel import web as papel_web
 from quant import integration as quant_integration
 from sync_ruleta_express import CSV_PATH, run_once
 
@@ -87,6 +89,9 @@ class DashboardState:
                 "refresh_interval_seconds": SYNC_INTERVAL,
                 "horario": horario_loteka.estado(),
             }
+            # Modo papel: mismo bloque que en Vercel, con el libro en disco local.
+            payload["papel"] = papel_web.panel(payload["results"], papel_registro.AlmacenArchivos())
+            payload["storage_restaurado"] = []
             payload.update(self.monitor.payload())
             return quant_integration.attach(
                 payload, summary=self.quant, error=self.quant_error
