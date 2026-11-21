@@ -5,6 +5,7 @@ import io
 import json
 import os
 import tempfile
+import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -27,6 +28,7 @@ from quant import integration as quant_integration
 from sync_ruleta_express import (
     backfill_missing_draws,
     extract_results,
+    fetch_history_date,
     fetch_page,
 )
 
@@ -219,22 +221,49 @@ def read_csv_bytes(data: bytes) -> list[dict[str, str]]:
     return [{column: row.get(column, "") for column in EXPECTED_COLUMNS} for row in rows]
 
 
+#: Segundos que una instancia caliente reutiliza el CSV ya leído de Supabase.
+#: Descargar ~1,3 MB en cada latido (1 080 al día) agota la cuota de salida
+#: del plan gratuito de Supabase en pocos días.
+CSV_CACHE_SECONDS = 600
+
+#: Días recientes en los que se buscan huecos. Los huecos viejos que Loteka
+#: nunca publicó se consultarían en cada llamada sin recuperar nada.
+BACKFILL_DIAS_VERCEL = 1
+
+_rows_cache: list[dict[str, str]] | None = None
+_rows_cache_at: float = 0.0
+#: True si la última lectura del CSV remoto falló por algo distinto de «no existe».
+_lectura_remota_fallida: bool = False
+
+
+def _recordar_filas(rows: list[dict[str, str]]) -> None:
+    global _rows_cache, _rows_cache_at
+    _rows_cache = list(rows)
+    _rows_cache_at = time.monotonic()
+
+
 def read_rows() -> list[dict[str, str]]:
-    "Carga el CSV remoto y combina el hist��rico versionado como respaldo/base."
+    "Carga el CSV remoto y combina el histórico versionado como respaldo/base."
+    global _csv_remoto_ausente, _lectura_remota_fallida
+    if _rows_cache is not None and time.monotonic() - _rows_cache_at < CSV_CACHE_SECONDS:
+        return list(_rows_cache)
     local_rows: list[dict[str, str]] = []
     if LOCAL_CSV.exists():
         try:
             local_rows = read_csv_bytes(LOCAL_CSV.read_bytes())
         except Exception:
             local_rows = []
-    global _csv_remoto_ausente
     try:
         remote_rows = read_csv_bytes(blob_request("GET", "Resultados_RuletaExpress.csv"))
     except Exception as error:
         _csv_remoto_ausente = objeto_ausente(str(error))
+        _lectura_remota_fallida = not _csv_remoto_ausente
         return local_rows
     _csv_remoto_ausente = False
-    return merge_results(local_rows, remote_rows)
+    _lectura_remota_fallida = False
+    rows = merge_results(local_rows, remote_rows)
+    _recordar_filas(rows)
+    return rows
 
 
 def serialize_rows(rows: list[dict[str, str]]) -> bytes:
@@ -321,14 +350,16 @@ def backfill_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     de las últimas horas de la noche; el endpoint histórico sí los publica.
     Sin este relleno, el monitor vivo interpreta el hueco como una «pausa»
     y marca predicciones como «no evaluadas» que en realidad sí tenían
-    resultado. Limitado a los últimos días (BACKFILL_RECENT_DAYS) para no
-    golpear el origen en cada petición.
+    resultado. Limitado a los huecos que tocan los últimos días
+    (BACKFILL_DIAS_VERCEL): un corte largo que llega hasta hoy se rellena
+    entero, pero los huecos viejos que Loteka nunca publicó no se vuelven a
+    consultar en cada llamada (gastaban segundos del límite de 60 s).
     """
     if pd is None or not rows:
         return rows
     try:
         frame = pd.DataFrame(rows, columns=EXPECTED_COLUMNS)
-        recovered = backfill_missing_draws(frame, [])
+        recovered = backfill_missing_draws(frame, [], recent_days=BACKFILL_DIAS_VERCEL)
     except Exception:
         return rows
     if not recovered:
@@ -365,7 +396,14 @@ def recovery_for_rows(rows: list[dict[str, str]]) -> dict:
     return recovery
 
 
-def dashboard() -> dict:
+def dashboard(ligero: bool = False) -> dict:
+    """Ciclo completo del panel.
+
+    ``ligero=True`` (lo usa /api/cron) omite la recuperación de estado y el
+    análisis cuantitativo, que sólo sirven para mostrar el panel y son lo más
+    costoso: el latido tiene que sincronizar, guardar y registrar la
+    predicción en papel con holgura dentro de los 60 s de Vercel.
+    """
     try:
         rows = read_rows()
     except Exception as e:
@@ -376,18 +414,32 @@ def dashboard() -> dict:
     # no se consulta el origen: se sirven los datos guardados.
     if horario["abierto"]:
         try:
-            fresh = extract_results(fetch_page())
+            try:
+                fresh = extract_results(fetch_page())
+            except Exception as portada_error:
+                # Si la portada falla (bloqueo, cambio de HTML, Worker caído),
+                # el histórico del día publica los mismos sorteos: así el
+                # panel no se queda congelado en el último sorteo guardado.
+                hoy = horario_loteka.ahora().date()
+                fresh = fetch_history_date(hoy)
+                if not fresh:
+                    raise portada_error
+                error = f"Portada de Loteka no disponible; usando el histórico del día. ({portada_error})"
             current = merge_results(rows, fresh)
             # El homepage puede quedarse corto (se congela por horas): si hay
             # huecos respecto al histórico, se recuperan antes de alimentar
             # al monitor, para que no se registren pausas falsas.
             current = backfill_rows(current)
-            if SUPABASE_URL and SUPABASE_KEY and len(current) >= len(rows):
+            if SUPABASE_URL and SUPABASE_KEY and _lectura_remota_fallida:
+                # Sin leer el CSV de Supabase, `rows` es sólo la copia del
+                # repositorio (más corta): subirla pisaría el histórico.
+                error = error or "No se pudo leer el CSV de Supabase; no se guarda para no pisarlo."
+            elif SUPABASE_URL and SUPABASE_KEY and len(current) > len(rows):
                 try:
                     global _last_csv_hash
                     payload_csv = serialize_rows(current)
                     current_hash = str(hash(payload_csv))
-                    if current_hash != _last_csv_hash and len(current) > len(rows):
+                    if current_hash != _last_csv_hash:
                         blob_request(
                             "PUT",
                             "Resultados_RuletaExpress.csv",
@@ -395,7 +447,9 @@ def dashboard() -> dict:
                             "text/csv; charset=utf-8",
                         )
                         _last_csv_hash = current_hash
-                        rows = current
+                    # Sólo se cachea lo que ya está en Supabase: si el guardado
+                    # falla, la siguiente llamada vuelve a leer y reintenta.
+                    _recordar_filas(current)
                 except Exception as ex:
                     error = f"Error guardando CSV en Supabase: {ex}"
             rows = current
@@ -412,10 +466,11 @@ def dashboard() -> dict:
 
     recovery_error: str | None = None
     recovery = None
-    try:
-        recovery = recovery_for_rows(rows)
-    except Exception as exception:
-        recovery_error = str(exception)
+    if not ligero:
+        try:
+            recovery = recovery_for_rows(rows)
+        except Exception as exception:
+            recovery_error = str(exception)
 
     monitor_error: str | None = None
     monitor_payload: dict = {}
@@ -457,6 +512,8 @@ def dashboard() -> dict:
     payload["storage_restaurado"] = storage_restaurado
     # Análisis cuantitativo, decisión (SIN VENTAJA por defecto) y puerta de
     # señales; el informe se cachea por hash del dataset.
+    if ligero:
+        return payload
     return quant_integration.attach(payload, rows=rows)
 
 

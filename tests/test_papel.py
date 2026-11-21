@@ -148,7 +148,7 @@ def test_cron_exige_secreto_y_resume(monkeypatch):
     from api import cron
     assert not cron.autorizado(None, "s") and not cron.autorizado("Bearer s", "") and not cron.autorizado("Bearer x", "s")
     assert cron.autorizado("Bearer s", "s")
-    monkeypatch.setattr(cron.panel, "dashboard", lambda: {
+    monkeypatch.setattr(cron.panel, "dashboard", lambda **_: {
         "results": [{"No_Sorteo": "No. 9"}], "sync_error": None,
         "papel": {"proxima": {"sorteo": "10", "pick_regla": "4", "apostar": "1", "tardia": "0", "hora_prevista": "x"}, "persistente": True}})
     r = cron.ejecutar()

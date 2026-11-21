@@ -53,18 +53,54 @@ SERVER_DATE_PATTERN = re.compile(
 )
 
 
+#: Origen directo de Loteka (cuando no hay Worker configurado).
+DIRECT_BASE = "https://loteka.com.do"
+
+#: Segundos por petición. La función de Vercel tiene 60 s en total y el
+#: relleno de huecos puede hacer varias: no se puede esperar 30 s a cada una.
+FETCH_TIMEOUT = 15
+
+
+def _bases() -> list[str]:
+    """Orígenes a probar: sólo el configurado (el Worker, si existe).
+
+    No se cae al origen directo: Loteka bloquea las IPs de Vercel, así que
+    ese intento sólo gastaría tiempo del límite de 60 s de la función.
+    """
+    return [URL.rstrip("/")]
+
+
+def _headers(base: str) -> dict[str, str]:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "es-DO,es;q=0.9,*;q=0.8",
+    }
+    if base == DIRECT_BASE:
+        headers["Referer"] = "https://loteka.com.do/"
+    return headers
+
+
 def fetch_page() -> str:
-    request = Request(
-        URL,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (compatible; RuletaExpressCSV/1.0; "
-                "+https://loteka.com.do/)"
-            )
-        },
-    )
-    with urlopen(request, timeout=30) as response:
-        return response.read().decode("utf-8", errors="replace")
+    """Descarga la portada de Loteka (Worker primero, directo como respaldo)."""
+    errors = []
+    for base in _bases():
+        try:
+            request = Request(f"{base}/", headers=_headers(base))
+            with urlopen(request, timeout=FETCH_TIMEOUT) as response:
+                html = response.read().decode("utf-8", errors="replace")
+        except Exception as error:
+            errors.append(f"{base}: {error}")
+            continue
+        # Una página de bloqueo/desafío responde 200 pero sin la sección.
+        if 'id="result-chanceexpress2"' not in html:
+            errors.append(f"{base}: respuesta sin la sección de Ruleta Express")
+            continue
+        return html
+    raise RuntimeError("No se pudo descargar la portada de Loteka. " + " | ".join(errors))
 
 
 def extract_results(html: str) -> list[dict[str, str]]:
@@ -112,33 +148,35 @@ def fetch_history_date(day: date) -> list[dict[str, str]]:
     "Recupera todos los resultados publicados por Loteka para una fecha."
     params = urlencode({"fechaSeleccionada": day.strftime("%d/%m/%Y")})
     # El mismo bloqueo de IP que afecta al homepage afecta al endpoint
-    # histórico: si hay Worker de Cloudflare configurado, pasar por él.
-    # El Worker reenvía pathname + search tal cual, así que basta con
-    # sustituir el origen.
-    if WORKER_URL:
-        base = WORKER_URL
-        headers = {"User-Agent": "Mozilla/5.0"}
-    else:
-        base = "https://loteka.com.do"
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://loteka.com.do/",
-        }
-    request = Request(
-        f"{base}/wp-content/themes/loteka/getRuletaExpress.php?{params}",
-        headers=headers,
-    )
-    with urlopen(request, timeout=30) as response:
-        html = response.read().decode("utf-8", errors="replace")
-    # La portada trae la sección en vivo (result-chanceexpress2) y la variable
-    # fechaServidor; el histórico diario no. Si el proxy devuelve la portada
-    # en lugar del día solicitado, se descarta: de lo contrario se asignarían
-    # fechas equivocadas a sorteos recientes y se crearían huecos falsos.
-    if "result-chanceexpress2" in html or "fechaServidor" in html:
-        raise RuntimeError(
-            "El proxy devolvió la portada en vez del histórico diario. "
-            "Actualiza el Cloudflare Worker para que reenvíe ruta y query."
+    # histórico: se prueba primero el Worker (si hay) y luego el origen
+    # directo. El Worker reenvía pathname + search tal cual.
+    errors = []
+    html = None
+    for base in _bases():
+        request = Request(
+            f"{base}/wp-content/themes/loteka/getRuletaExpress.php?{params}",
+            headers=_headers(base),
         )
+        try:
+            with urlopen(request, timeout=FETCH_TIMEOUT) as response:
+                candidate = response.read().decode("utf-8", errors="replace")
+        except Exception as error:
+            errors.append(f"{base}: {error}")
+            continue
+        # La portada trae la sección en vivo (result-chanceexpress2) y la
+        # variable fechaServidor; el histórico diario no. Si el proxy devuelve
+        # la portada en lugar del día solicitado, se descarta: de lo contrario
+        # se asignarían fechas equivocadas a sorteos recientes.
+        if "result-chanceexpress2" in candidate or "fechaServidor" in candidate:
+            errors.append(
+                f"{base}: devolvió la portada en vez del histórico diario "
+                "(actualiza el Cloudflare Worker para que reenvíe ruta y query)"
+            )
+            continue
+        html = candidate
+        break
+    if html is None:
+        raise RuntimeError("No se pudo consultar el histórico de Loteka. " + " | ".join(errors))
     historical = []
     historical_pattern = re.compile(
         r'<li[^>]*>.*?'
@@ -158,8 +196,20 @@ def fetch_history_date(day: date) -> list[dict[str, str]]:
             })
     return historical
 
-def backfill_missing_draws(frame: pd.DataFrame, fresh_rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    "Consulta fechas que enmarcan huecos y devuelve sorteos históricos confirmados."
+def backfill_missing_draws(
+    frame: pd.DataFrame,
+    fresh_rows: list[dict[str, str]],
+    recent_days: int | None = None,
+) -> list[dict[str, str]]:
+    """Consulta fechas que enmarcan huecos y devuelve sorteos históricos confirmados.
+
+    ``recent_days`` limita los huecos a los que tocan los últimos días (por
+    defecto ``BACKFILL_RECENT_DAYS``). Un hueco que llega hasta hoy se rellena
+    entero aunque empiece antes; los huecos viejos que Loteka nunca publicó
+    se ignoran y no se vuelven a consultar en cada sincronización.
+    """
+    if recent_days is None:
+        recent_days = BACKFILL_RECENT_DAYS
     if frame.empty:
         return []
     known: dict[int, dict[str, str]] = {}
@@ -196,7 +246,7 @@ def backfill_missing_draws(frame: pd.DataFrame, fresh_rows: list[dict[str, str]]
             continue
         hi_date, lo_date = dated[hi], dated[lo]
         if newest_date and max(hi_date, lo_date) < newest_date - timedelta(
-            days=BACKFILL_RECENT_DAYS
+            days=recent_days
         ):
             continue
         start, end = sorted((hi_date, lo_date))

@@ -29,7 +29,7 @@ def autorizado(cabecera: str | None, secreto: str | None) -> bool:
 
 def ejecutar() -> dict:
     """Un ciclo completo; devuelve un resumen pequeño (no el histórico)."""
-    datos = panel.dashboard()
+    datos = panel.dashboard(ligero=True)
     resultados = datos.get("results") or []
     papel = datos.get("papel") or {}
     proxima = papel.get("proxima") or {}
